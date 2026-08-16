@@ -1,9 +1,9 @@
 # Assets do fluxo de registro
 
-Coloque nesta pasta, mantendo exatamente estes nomes:
+Esta pasta contém os três assets oficiais usados pelo cadastro:
 
 - `logo_escala_imob.png`
 - `logo_simples_escala_imob.png`
 - `imagem_fim_registro.png`
 
-Os componentes já apontam para esses caminhos e possuem fallback visual enquanto os arquivos ainda não estiverem disponíveis.
+Regra visual: imagens de usuário, logos e ilustrações devem usar comportamento equivalente a `object-fit: contain`; não cortar conteúdo com `cover`/fill.

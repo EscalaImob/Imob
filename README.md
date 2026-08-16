@@ -109,3 +109,22 @@ Os assets finais do Figma devem ser colocados em `public/assets/registration/` c
 - `imagem_fim_registro.png`
 
 Enquanto esses arquivos não estiverem presentes, os componentes usam fallbacks e o build continua funcional.
+
+
+## Registro da plataforma
+
+O frontend agora possui uma entrada multipágina em `/registro/`, baseada no Figma real do onboarding. A página atual em `/` continua sendo o diagnóstico existente.
+
+Fluxo visual atual:
+
+```text
+Criar conta
+→ Definir preferências
+→ Configurar sua operação
+→ Adicionar equipe
+→ Tudo pronto
+```
+
+Os assets oficiais ficam em `public/assets/registration/`. Imagens de perfil, logos e a ilustração final devem sempre preservar o conteúdo com comportamento `contain`, sem crop/fill.
+
+A integração backend será conectada de forma incremental; não inventar destino para `Começar agora` antes do layout real pós-login.

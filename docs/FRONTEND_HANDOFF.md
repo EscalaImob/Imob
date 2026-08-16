@@ -580,3 +580,17 @@ Em caso de divergência:
 5. captura de referência.
 
 Capturas visuais antigas não devem prevalecer sobre regra funcional escrita.
+
+
+## Cadastro/onboarding real
+
+As telas de Figma recebidas em 16/08/2026 definem o fluxo real de `/registro/`. A implementação visual possui quatro etapas e conclusão, sem substituir o diagnóstico atual em `/`.
+
+Regras já fechadas:
+
+- azul principal `#0106FE`;
+- assets oficiais em `public/assets/registration/`;
+- imagens sempre em `contain`/fit, nunca `cover`/fill;
+- os três dropdowns e chips seguem exatamente as opções entregues no Figma;
+- o destino de `Começar agora` permanece pendente até o frontend pós-login ser definido;
+- integração HTTP deve acompanhar a jornada real, não o catálogo especulativo.
