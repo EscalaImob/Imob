@@ -97,3 +97,15 @@ As decisões de integração, responsabilidades do frontend e orientações para
 ```text
 docs/FRONTEND_HANDOFF.md
 ```
+
+## Fluxo de registro
+
+O cadastro/onboarding possui uma entrada estática própria em `/registro/`, sem alterar a landing/diagnóstico atual em `/`.
+
+Os assets finais do Figma devem ser colocados em `public/assets/registration/` com estes nomes exatos:
+
+- `logo_escala_imob.png`
+- `logo_simples_escala_imob.png`
+- `imagem_fim_registro.png`
+
+Enquanto esses arquivos não estiverem presentes, os componentes usam fallbacks e o build continua funcional.
