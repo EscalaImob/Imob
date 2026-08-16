@@ -594,3 +594,56 @@ Regras já fechadas:
 - os três dropdowns e chips seguem exatamente as opções entregues no Figma;
 - o destino de `Começar agora` permanece pendente até o frontend pós-login ser definido;
 - integração HTTP deve acompanhar a jornada real, não o catálogo especulativo.
+
+## Registro — integração real do Passo 1
+
+O fluxo `/registro/` deixa de avançar localmente por simples mudança de estado no Passo 1. O botão `Continuar` chama agora:
+
+```text
+POST {VITE_API_URL}/registration
+```
+
+Somente após resposta `201` válida o frontend:
+
+```text
+salva a sessão do onboarding em sessionStorage
+→ remove a senha do estado React
+→ normaliza o email com a resposta do backend
+→ avança para o Passo 2
+```
+
+Estados previstos nesta etapa:
+
+```text
+formulário inválido → botão não submete
+requisição em andamento → "Criando conta..." e bloqueio de clique duplo
+409 → email já cadastrado
+422 → primeira mensagem de validação retornada pelo backend
+429 → mensagem de excesso de tentativas
+5xx → indisponibilidade temporária
+network/timeout → mensagem própria sem limpar os dados digitados
+```
+
+A foto de perfil continua apenas em preview/memória nesta etapa. O arquivo será enviado depois da autenticação, usando a infraestrutura privada de arquivos, quando o endpoint de onboarding autenticado for publicado.
+
+A sessão atual em `sessionStorage` é deliberadamente transitória. Persistência de login e refresh automático serão definidos com as telas reais de login/recuperação de acesso.
+
+
+## Registro — integração do Passo 2
+
+A tela de preferências não é mais apenas local.
+
+```text
+Passo 1
+→ POST /registration
+→ sessionStorage com access token
+→ Passo 2
+→ PATCH /onboarding/preferences
+→ Passo 3
+```
+
+O Continue salva exatamente empresa, atuação, função, foco e chips selecionados. Como o Figma não marca esses campos como obrigatórios e oferece `Pular por enquanto`, o frontend não impõe obrigatoriedade adicional.
+
+`Pular por enquanto` envia `{ "skip": true }` e só avança depois de resposta válida da API.
+
+Se a sessão do onboarding estiver ausente/expirada, o usuário permanece no Passo 2 e recebe erro explícito. Renovação de token será fechada com a jornada real de login.

@@ -8,9 +8,17 @@ interface Props {
   value: RegistrationFormState;
   onChange: (patch: Partial<RegistrationFormState>) => void;
   onContinue: () => void;
+  isSubmitting: boolean;
+  errorMessage: string | null;
 }
 
-export function AccountStep({ value, onChange, onContinue }: Props) {
+export function AccountStep({
+  value,
+  onChange,
+  onContinue,
+  isSubmitting,
+  errorMessage,
+}: Props) {
   const [showPassword, setShowPassword] = useState(false);
   const rules = [
     { label: "Use pelo menos 8 caracteres", ok: value.password.length >= 8 },
@@ -18,7 +26,15 @@ export function AccountStep({ value, onChange, onContinue }: Props) {
     { label: "Pelo menos 1 letra maiúscula", ok: /[A-ZÁÀÂÃÉÈÊÍÌÎÓÒÔÕÚÙÛÇ]/.test(value.password) },
     { label: "Deve conter pelo menos 1 símbolo", ok: /[^\p{L}\p{N}\s]/u.test(value.password) },
   ];
-  const canContinue = value.firstName.trim() && value.lastName.trim() && /\S+@\S+\.\S+/.test(value.email) && value.phoneNumber.trim() && rules.every((rule) => rule.ok);
+  const normalizedPhone = value.phoneNumber.replace(/\D/g, "");
+  const canContinue = Boolean(
+    value.firstName.trim() &&
+      value.lastName.trim() &&
+      /\S+@\S+\.\S+/.test(value.email) &&
+      normalizedPhone.length >= 10 &&
+      normalizedPhone.length <= 11 &&
+      rules.every((rule) => rule.ok),
+  );
 
   return (
     <section className="registration-card registration-card--account">
@@ -68,7 +84,21 @@ export function AccountStep({ value, onChange, onContinue }: Props) {
         {rules.map((rule) => <span className={rule.ok ? "is-valid" : ""} key={rule.label}><CheckIcon />{rule.label}</span>)}
       </div>
 
-      <button className="registration-primary" type="button" disabled={!canContinue} onClick={onContinue}>Continuar</button>
+      {errorMessage && (
+        <p className="registration-form-error" role="alert">
+          {errorMessage}
+        </p>
+      )}
+
+      <button
+        className="registration-primary"
+        type="button"
+        disabled={!canContinue || isSubmitting}
+        onClick={onContinue}
+        aria-busy={isSubmitting}
+      >
+        {isSubmitting ? "Criando conta..." : "Continuar"}
+      </button>
     </section>
   );
 }

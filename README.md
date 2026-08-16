@@ -128,3 +128,13 @@ Criar conta
 Os assets oficiais ficam em `public/assets/registration/`. Imagens de perfil, logos e a ilustração final devem sempre preservar o conteúdo com comportamento `contain`, sem crop/fill.
 
 A integração backend será conectada de forma incremental; não inventar destino para `Começar agora` antes do layout real pós-login.
+
+
+### Registro
+
+A rota `/registro/` possui integração real do Passo 1 com `POST /registration`. A conta só avança para preferências depois que Cognito e PostgreSQL confirmam a criação e o frontend recebe uma sessão de onboarding.
+
+
+### Registro — Passo 2 integrado
+
+Depois que `POST /registration` cria a conta e devolve uma sessão, o Passo 2 envia `PATCH /onboarding/preferences` com o access token Cognito. O botão `Pular por enquanto` também passa pelo backend para avançar o onboarding sem inventar campos obrigatórios. O frontend só segue ao Passo 3 após confirmação da API.

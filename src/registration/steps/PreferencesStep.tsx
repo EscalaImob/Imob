@@ -7,9 +7,18 @@ interface Props {
   onChange: (patch: Partial<RegistrationFormState>) => void;
   onContinue: () => void;
   onSkip: () => void;
+  isSubmitting: boolean;
+  errorMessage: string | null;
 }
 
-export function PreferencesStep({ value, onChange, onContinue, onSkip }: Props) {
+export function PreferencesStep({
+  value,
+  onChange,
+  onContinue,
+  onSkip,
+  isSubmitting,
+  errorMessage,
+}: Props) {
   const toggleUse = (option: string) => onChange({ intendedUses: value.intendedUses.includes(option) ? value.intendedUses.filter((item) => item !== option) : [...value.intendedUses, option] });
 
   return (
@@ -35,9 +44,30 @@ export function PreferencesStep({ value, onChange, onContinue, onSkip }: Props) 
         </div>
       </fieldset>
 
+      {errorMessage && (
+        <p className="registration-form-error" role="alert">
+          {errorMessage}
+        </p>
+      )}
+
       <div className="registration-card__actions registration-card__actions--stacked">
-        <button className="registration-primary" type="button" onClick={onContinue}>Continuar</button>
-        <button className="registration-secondary" type="button" onClick={onSkip}>Pular por enquanto</button>
+        <button
+          className="registration-primary"
+          type="button"
+          onClick={onContinue}
+          disabled={isSubmitting}
+          aria-busy={isSubmitting}
+        >
+          {isSubmitting ? "Salvando..." : "Continuar"}
+        </button>
+        <button
+          className="registration-secondary"
+          type="button"
+          onClick={onSkip}
+          disabled={isSubmitting}
+        >
+          Pular por enquanto
+        </button>
       </div>
     </section>
   );
