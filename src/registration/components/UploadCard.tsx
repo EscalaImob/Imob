@@ -17,7 +17,9 @@ export function UploadCard({ previewUrl, title, description, accept = "image/*",
   return (
     <div className={`registration-upload registration-upload--${variant}`}>
       <div className="registration-upload__preview">
-        {previewUrl ? <img src={previewUrl} alt="Pré-visualização" /> : variant === "profile" ? <UserIcon /> : <span className="registration-upload__logo-fallback">⌂</span>}
+        <div className="registration-upload__media">
+          {previewUrl ? <img src={previewUrl} alt="Pré-visualização" /> : variant === "profile" ? <UserIcon /> : <span className="registration-upload__logo-fallback">⌂</span>}
+        </div>
         {previewUrl && onClear && (
           <button type="button" className="registration-upload__remove" onClick={onClear} aria-label="Remover imagem"><CloseIcon /></button>
         )}

@@ -13,7 +13,7 @@ export function DoneStep() {
       </div>
       <h2>Tudo pronto!</h2>
       <p>Concluímos sua configuração inicial. A partir<br className="desktop-only" /> de agora, você pode começar a estruturar sua<br className="desktop-only" /> operação, cadastrar imóveis e organizar suas<br className="desktop-only" /> oportunidades em um só lugar.</p>
-      <button className="registration-primary registration-primary--start" type="button">Começar agora <ArrowRightIcon /></button>
+      <button className="registration-primary registration-primary--start" type="button" onClick={() => globalThis.location.assign("/app/")}>Começar agora <ArrowRightIcon /></button>
     </section>
   );
 }

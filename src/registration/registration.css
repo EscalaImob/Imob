@@ -32,9 +32,10 @@ button { color: inherit; }
 .registration-card__header p, .registration-operation-card__header p { margin: 0; color: #737380; font-size: 17px; line-height: 1.55; }
 
 .registration-upload { display: grid; grid-template-columns: 72px minmax(0,1fr) auto; gap: 16px; align-items: center; min-height: 140px; margin-top: 22px; padding: 16px; border: 1px solid #e2e2e5; border-radius: 12px; }
-.registration-upload__preview { position: relative; display: grid; place-items: center; width: 72px; height: 72px; overflow: visible; border: 1px solid #dedee2; border-radius: 50%; background: #f8f8f9; color: #20202d; }
-.registration-upload__preview > svg { width: 31px; height: 31px; }
-.registration-upload__preview img { width: 100%; height: 100%; display: block; border-radius: inherit; object-fit: contain; object-position: center; }
+.registration-upload__preview { position: relative; width: 72px; height: 72px; min-width: 72px; min-height: 72px; aspect-ratio: 1 / 1; overflow: visible; }
+.registration-upload__media { display: grid; place-items: center; width: 100%; height: 100%; overflow: hidden; border: 1px solid #dedee2; border-radius: 50%; background: #f8f8f9; color: #20202d; }
+.registration-upload__media > svg { width: 31px; height: 31px; }
+.registration-upload__media img { display: block; width: 100%; height: 100%; min-width: 100%; min-height: 100%; max-width: none; max-height: none; object-position: center; }
 .registration-upload__remove { position: absolute; left: -4px; top: -5px; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: #eb4e4e; color: #fff; cursor: pointer; }
 .registration-upload__remove svg { width: 12px; height: 12px; }
 .registration-upload__copy strong { display: block; margin-bottom: 4px; color: #27272f; font-size: 16px; font-weight: 500; }
@@ -100,8 +101,8 @@ button { color: inherit; }
 .registration-pill { align-self: flex-start; margin-bottom: 14px; padding: 7px 14px; border-radius: 999px; background: #eff0ff; color: var(--registration-blue); font-size: 13px; }
 .registration-operation-form__intro { margin: 0 0 22px; color: #2b2b34; font-size: 17px; line-height: 1.5; font-weight: 500; }
 .registration-upload--logo { min-height: 88px; grid-template-columns: 70px minmax(0,1fr) auto; margin-top: 0; padding: 0; border: 0; }
-.registration-upload--logo .registration-upload__preview { width: 70px; height: 70px; border-radius: 13px; background: var(--registration-blue); color: #fff; box-shadow: 0 8px 20px rgba(1,6,254,.15); }
-.registration-upload--logo .registration-upload__preview img { padding: 4px; }
+.registration-upload--logo .registration-upload__preview { width: 70px; height: 70px; min-width: 70px; min-height: 70px; }
+.registration-upload--logo .registration-upload__media { border-radius: 13px; background: var(--registration-blue); color: #fff; box-shadow: 0 8px 20px rgba(1,6,254,.15); }
 .registration-upload__logo-fallback { display: grid; place-items: center; width: 36px; height: 36px; border: 2px solid #fff; border-radius: 8px; font-size: 0; }
 .registration-upload__logo-fallback::before { content: "⌂"; font-size: 23px; line-height: 1; }
 .registration-upload--logo .registration-upload__copy strong { font-size: 15px; }
@@ -176,13 +177,13 @@ button { color: inherit; }
   .registration-card__header h2, .registration-operation-card__header h2 { font-size: 25px; }
   .registration-card__header p, .registration-operation-card__header p { font-size: 15px; }
   .registration-upload { grid-template-columns: 64px 1fr; }
-  .registration-upload__preview { width: 64px; height: 64px; }
+  .registration-upload__preview { width: 64px; height: 64px; min-width: 64px; min-height: 64px; }
   .registration-upload__button { grid-column: 1 / -1; width: 100%; }
   .password-rules { grid-template-columns: 1fr; }
   .registration-operation-card__header { padding: 23px 18px 18px; }
   .registration-operation-form { padding: 20px 18px; }
   .registration-upload--logo { grid-template-columns: 62px 1fr; }
-  .registration-upload--logo .registration-upload__preview { width: 62px; height: 62px; }
+  .registration-upload--logo .registration-upload__preview { width: 62px; height: 62px; min-width: 62px; min-height: 62px; }
   .registration-card__actions--spread { gap: 12px; }
   .registration-card__actions--spread > button { flex: 1; min-width: 0; }
   .registration-done-image { width: min(280px, 100%); height: auto; }
@@ -202,3 +203,38 @@ button { color: inherit; }
 .registration-primary[aria-busy="true"] {
   cursor: wait;
 }
+
+/* Uploaded images preserve the fixed Figma frames instead of changing layout. */
+.registration-upload--profile .registration-upload__media img {
+  object-fit: cover;
+}
+
+.registration-upload--logo .registration-upload__media img {
+  width: calc(100% - 14px);
+  height: calc(100% - 14px);
+  min-width: 0;
+  min-height: 0;
+  padding: 4px;
+  border-radius: 9px;
+  background: #fff;
+  object-fit: contain;
+}
+
+.operation-preview__switcher img {
+  display: block;
+  flex: 0 0 47px;
+  width: 47px;
+  height: 47px;
+  overflow: hidden;
+  object-fit: contain;
+  object-position: center;
+}
+
+.operation-preview__switcher.has-custom-logo img {
+  padding: 5px;
+  border: 1px solid #eeeef2;
+  background: #fff;
+  object-fit: contain;
+  object-position: center;
+}
+.registration-form-error--upload { margin-top: 10px; }

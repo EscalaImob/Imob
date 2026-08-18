@@ -11,9 +11,11 @@ interface Props {
   onChange: (patch: Partial<RegistrationFormState>) => void;
   onContinue: () => void;
   onSkip: () => void;
+  isSubmitting: boolean;
+  errorMessage: string | null;
 }
 
-export function OperationStep({ value, onChange, onContinue, onSkip }: Props) {
+export function OperationStep({ value, onChange, onContinue, onSkip, isSubmitting, errorMessage }: Props) {
   const [iconSource, setIconSource] = useState(operationIconPath);
 
   useEffect(() => {
@@ -50,9 +52,10 @@ export function OperationStep({ value, onChange, onContinue, onSkip }: Props) {
             <TextField id="registration-operation-name" label="Nome da operação" placeholder="Escala IMOB" value={value.operationName} onChange={(e) => onChange({ operationName: e.target.value })} />
             <TextAreaField id="registration-operation-description" label="Descrição" placeholder="Descreva resumidamente sua atuação no mercado imobiliário" value={value.operationDescription} onChange={(e) => onChange({ operationDescription: e.target.value })} rows={5} />
           </div>
+          {errorMessage && <p className="registration-form-error" role="alert">{errorMessage}</p>}
           <div className="registration-card__actions registration-card__actions--spread">
-            <button className="registration-secondary registration-secondary--small" type="button" onClick={onSkip}>Pular por enquanto</button>
-            <button className="registration-primary registration-primary--small" type="button" onClick={onContinue}>Continue</button>
+            <button className="registration-secondary registration-secondary--small" type="button" onClick={onSkip} disabled={isSubmitting}>Pular por enquanto</button>
+            <button className="registration-primary registration-primary--small" type="button" onClick={onContinue} disabled={isSubmitting} aria-busy={isSubmitting}>{isSubmitting ? "Salvando..." : "Continue"}</button>
           </div>
         </div>
         <div className="operation-preview" aria-hidden="true">
@@ -64,8 +67,12 @@ export function OperationStep({ value, onChange, onContinue, onSkip }: Props) {
               <div className="operation-preview__separator" />
               <div className="operation-preview__lines operation-preview__lines--bottom">{Array.from({ length: 4 }, (_, i) => <span key={i}><i /><b /></span>)}</div>
             </div>
-            <div className="operation-preview__switcher">
-              <img src={iconSource} onError={() => setIconSource(fallbackIcon)} alt="" />
+            <div className={`operation-preview__switcher${value.operationLogoPreviewUrl ? " has-custom-logo" : ""}`}>
+              <img
+                src={value.operationLogoPreviewUrl || iconSource}
+                onError={() => setIconSource(fallbackIcon)}
+                alt=""
+              />
               <span><strong>{value.operationName || "Escala IMOB"}</strong><small>2 Membros</small></span>
               <span className="operation-preview__arrows">⌃<br />⌄</span>
             </div>

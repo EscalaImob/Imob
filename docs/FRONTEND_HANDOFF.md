@@ -8,7 +8,23 @@
 
 ## 1. Estado atual
 
-O frontend atual é a página pública do **Diagnóstico Escala IMOB**.
+O frontend mantém a página pública do **Diagnóstico Escala IMOB** e agora também possui as jornadas públicas reais de cadastro/autenticação.
+
+Rotas implementadas:
+
+```text
+/                    → Diagnóstico Escala IMOB
+/registro/            → onboarding em 4 passos
+/login/               → login Cognito via backend
+/verificar-email/     → confirmação por token Brevo
+/recuperar-senha/     → solicitação genérica de recuperação
+/redefinir-senha/     → redefinição por token de uso único
+/app/                 → shell autenticado e Visão Geral estrutural
+```
+
+O shell pós-login já existe em `/app/`. Os módulos de negócio continuam sendo implementados incrementalmente e a Visão Geral não usa métricas fictícias: cada indicador será conectado quando seu módulo de origem existir.
+
+O frontend atual inclui a página pública do **Diagnóstico Escala IMOB**.
 
 Fluxo existente:
 
@@ -23,6 +39,8 @@ Tela de sucesso
 ```
 
 Esse fluxo está publicado, integrado ao backend e não deve ser quebrado enquanto a plataforma é desenvolvida.
+
+A sessão de onboarding e a sessão de login são separadas. O login salva tokens apenas depois de autenticação real; com `Lembre de mim` usa `localStorage`, sem essa opção usa `sessionStorage`. Senhas nunca são persistidas. O refresh passa novamente pelo backend e a aplicação exige e-mail verificado.
 
 ---
 
@@ -115,29 +133,17 @@ Nunca assumir que esconder um botão substitui autorização.
 
 ## 5. Contexto de sessão esperado
 
-O contrato alvo deve permitir ao frontend obter em uma única chamada o contexto necessário para montar a aplicação.
-
-Endpoint planejado:
+`GET /v1/me` continua sendo o contrato de identidade e memberships. Para montar o ambiente autenticado em uma única chamada contextual, o shell usa:
 
 ```http
-GET /v1/me
+GET /v1/app/bootstrap
+Authorization: Bearer <access-token>
+X-Organization-Id: <organization-id>   # opcional no primeiro acesso
 ```
 
-Resposta conceitual:
+Quando `X-Organization-Id` não é informado, o backend seleciona somente entre memberships ativas do próprio usuário. A resposta entrega usuário, organizações disponíveis, organização ativa, quantidade de membros, roles, grants de permissão e URLs temporárias para avatar/logo privados quando existirem.
 
-```json
-{
-  "data": {
-    "user": {},
-    "organization": {},
-    "teams": [],
-    "roles": [],
-    "capabilities": []
-  }
-}
-```
-
-O frontend deve usar `capabilities` para experiência e navegação, mas toda ação continuará sendo validada no backend.
+O frontend persiste apenas o identificador da organização ativa como preferência. A autorização continua sendo validada no backend; os grants retornados servem para experiência e navegação conforme cada módulo ganhar seus códigos de permissão.
 
 ---
 
