@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useState, type ComponentType, type SVG
 import brandLogo from "../assets/brand/escala-imob-original.svg";
 import { clearAuthSession, ensureValidAuthSession } from "../auth/session";
 import { AppApiError, getAppBootstrap, type AccessScope, type AppBootstrapResult } from "../services/appApi";
+import { applyPanelTheme, readPanelTheme } from "./panelTheme";
+import { listAgenda, type AgendaItem } from "../services/productivityApi";
+import { listOrganizationMembers, type OrganizationMember } from "../services/organizationSettingsApi";
 import {
   BellIcon,
   BuildingIcon,
@@ -206,6 +209,33 @@ function ModuleAccessDenied({ title }: { title: string }) {
 function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
   const activeOrganization = bootstrap.activeOrganization;
   const dateLabel = useMemo(() => formattedDate(activeOrganization?.timezone), [activeOrganization?.timezone]);
+  const [weekItems, setWeekItems] = useState<AgendaItem[]>([]);
+  const [weekLoading, setWeekLoading] = useState(true);
+  const [weekError, setWeekError] = useState<string | null>(null);
+  const weekDays = useMemo(() => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+    return Array.from({ length: 7 }, (_, index) => { const day = new Date(start); day.setDate(start.getDate() + index); return day; });
+  }, []);
+
+  useEffect(() => {
+    if (!activeOrganization) return;
+    const to = new Date(weekDays[6]); to.setHours(23, 59, 59, 999);
+    let active = true; setWeekLoading(true); setWeekError(null);
+    void listAgenda(activeOrganization.id, weekDays[0], to)
+      .then((result) => { if (active) setWeekItems(result.items); })
+      .catch((loadError) => { if (active) setWeekError(loadError instanceof AppApiError ? loadError.message : "Não foi possível carregar a semana."); })
+      .finally(() => { if (active) setWeekLoading(false); });
+    return () => { active = false; };
+  }, [activeOrganization, weekDays]);
+
+  function urgency(item: AgendaItem) {
+    const distance = new Date(item.startsAt).getTime() - Date.now();
+    if (distance < 0 && item.status !== "completed" && item.status !== "canceled") return "overdue";
+    if (distance <= 86_400_000) return "soon";
+    return "future";
+  }
 
   return (
     <>
@@ -216,7 +246,7 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
       <section className="app-dashboard-grid">
         <article className="app-dashboard-panel app-dashboard-panel--wide"><header><div><FunnelIcon /><strong>Pipeline comercial</strong></div></header><div className="app-dashboard-panel__empty"><FunnelIcon /><h2>Sua operação comercial aparecerá aqui</h2><p>Os indicadores consolidados dos dois funis serão conectados aqui à medida que o dashboard operacional for ativado.</p></div></article>
         <article className="app-dashboard-panel"><header><div><BuildingIcon /><strong>Portfólio ativo</strong></div></header><div className="app-dashboard-panel__empty"><BuildingIcon /><h2>Portfólio ainda sem indicadores</h2><p>Imóveis cadastrados alimentarão este painel automaticamente.</p></div></article>
-        <article className="app-dashboard-panel app-dashboard-panel--wide"><header><div><TasksIcon /><strong>Tarefas do dia</strong></div></header><div className="app-dashboard-panel__empty app-dashboard-panel__empty--compact"><TasksIcon /><p>As tarefas do dia aparecerão aqui.</p></div></article>
+        <article className="app-dashboard-panel app-dashboard-panel--wide app-week-panel"><header><div><CalendarIcon /><strong>Calendário da semana</strong></div><a href="/app/agenda/">Abrir agenda</a></header>{weekLoading ? <div className="app-list-loading">Carregando semana...</div> : weekError ? <div className="app-inline-error">{weekError}</div> : <div className="app-week-calendar">{weekDays.map((day) => { const items = weekItems.filter((item) => new Date(item.startsAt).toDateString() === day.toDateString()); return <section key={day.toISOString()} className={day.toDateString() === new Date().toDateString() ? "is-today" : ""}><header><strong>{new Intl.DateTimeFormat("pt-BR", { weekday: "short" }).format(day)}</strong><span>{day.getDate()}</span></header><div>{items.map((item) => <article key={`${item.source}-${item.id}`} className={`is-${urgency(item)}`} title={item.description ?? item.title}><time>{new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(item.startsAt))}</time><strong>{item.title}</strong></article>)}{items.length === 0 && <small>Livre</small>}</div></section>; })}</div>}</article>
         <article className="app-dashboard-panel"><header><div><PinIcon /><strong>Próximas visitas</strong></div></header><div className="app-dashboard-panel__empty app-dashboard-panel__empty--compact"><PinIcon /><p>As próximas visitas aparecerão aqui.</p></div></article>
       </section>
     </>
@@ -231,7 +261,12 @@ export function App() {
   const [collapsed, setCollapsed] = useState(() => readSidebarCollapsed());
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const page = currentPage();
+  const [organizationMembersOpen, setOrganizationMembersOpen] = useState(false);
+  const [organizationMembers, setOrganizationMembers] = useState<OrganizationMember[]>([]);
+  const [organizationMembersLoading, setOrganizationMembersLoading] = useState(false);
+  const [organizationMembersError, setOrganizationMembersError] = useState<string | null>(null);
+  const [route, setRoute] = useState(() => `${globalThis.location.pathname}${globalThis.location.search}`);
+  const page = useMemo(() => currentPage(), [route]);
 
   const load = useCallback(async (requestedOrganizationId?: string | null) => {
     setError(null);
@@ -259,12 +294,38 @@ export function App() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const routeChanged = () => {
+      setRoute(`${globalThis.location.pathname}${globalThis.location.search}`);
+      setMobileMenuOpen(false);
+      setUserMenuOpen(false);
+      globalThis.scrollTo({ top: 0, behavior: "auto" });
+    };
+    const handleAppLink = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const element = event.target instanceof Element ? event.target.closest("a[href]") : null;
+      if (!(element instanceof HTMLAnchorElement) || element.target || element.hasAttribute("download")) return;
+      const destination = new URL(element.href, globalThis.location.href);
+      if (destination.origin !== globalThis.location.origin || !destination.pathname.startsWith("/app/") || destination.pathname === globalThis.location.pathname) return;
+      event.preventDefault();
+      globalThis.history.pushState({}, "", `${destination.pathname}${destination.search}${destination.hash}`);
+      routeChanged();
+    };
+    globalThis.addEventListener("popstate", routeChanged);
+    document.addEventListener("click", handleAppLink);
+    return () => {
+      globalThis.removeEventListener("popstate", routeChanged);
+      document.removeEventListener("click", handleAppLink);
+    };
+  }, []);
   useEffect(() => { document.title = `Escala IMOB — ${page.title}`; }, [page.title]);
+  useEffect(() => { if (bootstrap?.activeOrganization) applyPanelTheme(readPanelTheme(bootstrap.activeOrganization.id, bootstrap.activeOrganization.membershipId)); }, [bootstrap?.activeOrganization]);
 
   const activeOrganization = bootstrap?.activeOrganization ?? null;
 
   async function handleOrganizationChange(organizationId: string) {
     if (!organizationId || organizationId === activeOrganization?.id || switchingOrganization) return;
+    setOrganizationMembersOpen(false); setOrganizationMembers([]); setOrganizationMembersError(null);
     setSwitchingOrganization(true);
     await load(organizationId);
     setSwitchingOrganization(false);
@@ -275,6 +336,17 @@ export function App() {
     const next = !collapsed;
     setCollapsed(next);
     saveSidebarCollapsed(next);
+  }
+
+  async function toggleOrganizationMembers() {
+    const next = !organizationMembersOpen;
+    setOrganizationMembersOpen(next);
+    const currentBootstrap = bootstrap;
+    if (!next || !activeOrganization || !currentBootstrap || organizationMembers.length || organizationMembersLoading) return;
+    setOrganizationMembersLoading(true); setOrganizationMembersError(null);
+    try { setOrganizationMembers(await listOrganizationMembers(activeOrganization.id)); }
+    catch { setOrganizationMembers([{ membershipId: activeOrganization.membershipId, userId: currentBootstrap.user.id, email: currentBootstrap.user.email, displayName: currentBootstrap.user.displayName, membershipStatus: "active", userStatus: "active" }]); setOrganizationMembersError("Seu perfil permite visualizar apenas os próprios dados."); }
+    finally { setOrganizationMembersLoading(false); }
   }
 
   function handleLogout() {
@@ -347,11 +419,11 @@ export function App() {
           <button className="app-sidebar__collapse" type="button" onClick={handleCollapseToggle} aria-label={collapsed ? "Expandir menu" : "Recolher menu"} title={collapsed ? "Expandir menu" : "Recolher menu"}><CollapseIcon /></button>
         </div>
         <div className="app-sidebar__search" title="A busca global será ativada junto aos módulos de negócio"><SearchIcon /><input aria-label="Pesquisar" placeholder="Pesquisar" disabled /></div>
-        <div className="app-organization-card">
+        <div className={`app-organization-switcher${organizationMembersOpen ? " is-open" : ""}`}><div className="app-organization-card">
           <div className="app-organization-card__logo" aria-hidden={!activeOrganization?.logoUrl}>{activeOrganization?.logoUrl ? <img src={activeOrganization.logoUrl} alt="" /> : <span>{initials(activeOrganization?.name ?? "Escala IMOB")}</span>}</div>
           <div className="app-organization-card__text"><strong>{activeOrganization?.name ?? "Sem organização ativa"}</strong><span>{activeOrganization ? `${activeOrganization.memberCount} ${activeOrganization.memberCount === 1 ? "membro" : "membros"}` : "Selecione uma organização"}</span></div>
-          {bootstrap.organizations.length > 1 ? <select className="app-organization-card__select" value={activeOrganization?.id ?? ""} onChange={(event) => void handleOrganizationChange(event.target.value)} disabled={switchingOrganization} aria-label="Trocar organização">{bootstrap.organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}</select> : <ChevronIcon className="app-organization-card__chevron" />}
-        </div>
+          <button className="app-organization-card__toggle" type="button" onClick={() => void toggleOrganizationMembers()} aria-expanded={organizationMembersOpen} aria-label={organizationMembersOpen ? "Ocultar membros" : "Mostrar membros"}><ChevronIcon className="app-organization-card__chevron" /></button>
+        </div>{bootstrap.organizations.length > 1 && <label className="app-organization-picker"><span>Organização</span><select value={activeOrganization?.id ?? ""} onChange={(event) => void handleOrganizationChange(event.target.value)} disabled={switchingOrganization}>{bootstrap.organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}</select></label>}{organizationMembersOpen && <div className="app-organization-members" aria-live="polite">{organizationMembersLoading ? <span>Carregando membros...</span> : <>{organizationMembers.map((member) => <article key={member.membershipId}><span className="app-organization-member-avatar">{initials(member.displayName)}</span><div><strong>{member.displayName}</strong><small>{member.email || "Contato não informado"}</small></div></article>)}{organizationMembersError && <p>{organizationMembersError}</p>}</>}</div>}</div>
         <nav className="app-nav">
           {navigation.map((group) => {
             const visibleItems = group.items.filter(

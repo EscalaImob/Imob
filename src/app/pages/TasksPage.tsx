@@ -58,7 +58,7 @@ export function TasksPage({ organizationId, canCreate, canUpdate }: { organizati
 
   return (
     <>
-      <section className="app-module-header"><div><span className="app-section-eyebrow">Produtividade</span><h1>Quadro de tarefas</h1><p>Centralize próximos passos, prazos e responsabilidades da operação.</p></div>{canCreate && <button className="app-primary-button" type="button" onClick={() => setModalTask(null)}>+ Nova tarefa</button>}</section>
+      <section className="app-page-heading"><div><span className="app-section-eyebrow">Produtividade</span><h1>Quadro de tarefas</h1><p>Centralize próximos passos, prazos e responsabilidades da operação.</p></div>{canCreate && <button className="app-primary-button" type="button" onClick={() => setModalTask(null)}>+ Nova tarefa</button>}</section>
       {error && <div className="app-inline-error">{error}</div>}
       <section className="app-productivity-metrics">
         <article><strong>{result?.summary.pending ?? 0}</strong><span>Pendentes</span></article><article className="is-danger"><strong>{result?.summary.overdue ?? 0}</strong><span>Vencidas</span></article><article><strong>{result?.summary.dueToday ?? 0}</strong><span>Para hoje</span></article><article className="is-success"><strong>{result?.summary.completed ?? 0}</strong><span>Concluídas</span></article>
