@@ -6,7 +6,6 @@ import {
   BellIcon,
   BuildingIcon,
   CalendarIcon,
-  CardIcon,
   ChartIcon,
   ChevronIcon,
   ClipboardIcon,
@@ -47,6 +46,8 @@ import { InspectionEditorPage } from "./pages/InspectionEditorPage";
 import { FinancePage } from "./pages/FinancePage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { PlatformAdminPage } from "./pages/PlatformAdminPage";
+import { NotificationCenter } from "./components/NotificationCenter";
 import {
   readActiveOrganizationId,
   readSidebarCollapsed,
@@ -55,7 +56,7 @@ import {
 } from "./preferences";
 
 type NavIcon = ComponentType<SVGProps<SVGSVGElement>>;
-type PageKey = "overview" | "clients" | "leads" | "buyersFunnel" | "captureFunnel" | "opportunityDetail" | "properties" | "propertyEditor" | "publications" | "authorizations" | "authorizationEditor" | "contracts" | "contractEditor" | "inspections" | "inspectionEditor" | "finance" | "reports" | "settings" | "tasks" | "agenda" | "visits";
+type PageKey = "platformAdmin" | "overview" | "clients" | "leads" | "buyersFunnel" | "captureFunnel" | "opportunityDetail" | "properties" | "propertyEditor" | "publications" | "authorizations" | "authorizationEditor" | "contracts" | "contractEditor" | "inspections" | "inspectionEditor" | "finance" | "reports" | "settings" | "tasks" | "agenda" | "visits";
 
 type NavItem = {
   label: string;
@@ -63,6 +64,7 @@ type NavItem = {
   icon: NavIcon;
   available?: boolean;
   permission?: string;
+  platformPermission?: string;
 };
 
 type NavGroup = {
@@ -97,9 +99,11 @@ const navigation: NavGroup[] = [
     { label: "Financeiro", path: "/app/financeiro/", icon: WalletIcon, permission: "corporate.finance.read" },
     { label: "Relatórios", path: "/app/relatorios/", icon: ChartIcon, permission: "corporate.reports.read" },
   ] },
+  { label: "Plataforma", items: [
+    { label: "Administração", path: "/app/admin/", icon: GlobeIcon, platformPermission: "platform.access_keys.manage" },
+  ] },
   { label: "Sistema", items: [
     { label: "Configurações", path: "/app/configuracoes/", icon: SettingsIcon, permission: "organization.read" },
-    { label: "Meu plano e faturas", path: "/app/plano/", icon: CardIcon },
     { label: "Suporte técnico", path: "/app/suporte/", icon: LifeBuoyIcon },
   ] },
 ];
@@ -117,6 +121,7 @@ function normalizedPath(): string {
 
 function currentPage(): { key: PageKey; group: string; label: string; title: string } {
   const path = normalizedPath();
+  if (path === "/app/admin/") return { key: "platformAdmin", group: "Plataforma", label: "Administração", title: "Administração da plataforma" };
   if (path === "/app/configuracoes/") return { key: "settings", group: "Sistema", label: "Configurações", title: "Configurações" };
   if (path === "/app/relatorios/") return { key: "reports", group: "Gestão corporativa", label: "Relatórios", title: "Relatórios" };
   if (path === "/app/financeiro/") return { key: "finance", group: "Gestão corporativa", label: "Financeiro", title: "Financeiro" };
@@ -150,11 +155,18 @@ function formattedDate(timezone: string | undefined): string {
 }
 
 function roleLabel(data: AppBootstrapResult): string {
+  if (data.platformPermissions.includes("platform.access_keys.manage")) {
+    return "Admin da plataforma";
+  }
   return data.roles[0]?.name ?? "Membro da organização";
 }
 
 function hasPermission(data: AppBootstrapResult, code: string): boolean {
   return data.permissions.some((permission) => permission.permissionCode === code);
+}
+
+function hasPlatformPermission(data: AppBootstrapResult, code: string): boolean {
+  return data.platformPermissions.includes(code);
 }
 
 const accessScopeRank: Record<AccessScope, number> = { own: 0, team: 1, organization: 2 };
@@ -166,7 +178,11 @@ function hasPermissionAtScope(data: AppBootstrapResult, code: string, requiredSc
 }
 
 function navAvailable(item: NavItem, data: AppBootstrapResult): boolean {
-  return item.available === true || Boolean(item.permission && hasPermission(data, item.permission));
+  return (
+    item.available === true ||
+    Boolean(item.permission && hasPermission(data, item.permission)) ||
+    Boolean(item.platformPermission && hasPlatformPermission(data, item.platformPermission))
+  );
 }
 
 function LoadingScreen() {
@@ -271,6 +287,7 @@ export function App() {
   if (error) return <AccessError message={error} onRetry={() => { setLoading(true); void load(); }} />;
   if (!bootstrap) return null;
 
+  const canManagePlatform = hasPlatformPermission(bootstrap, "platform.access_keys.manage");
   const canCreateContact = hasPermission(bootstrap, "crm.contacts.create");
   const canCreateOpportunity = hasPermission(bootstrap, "crm.opportunities.create") && hasPermission(bootstrap, "crm.contacts.read");
   const canUpdateOpportunity = hasPermission(bootstrap, "crm.opportunities.update");
@@ -311,6 +328,7 @@ export function App() {
   const canReadRoles = hasPermission(bootstrap, "roles.read");
   const canManageRoles = hasPermission(bootstrap, "roles.manage");
   const canReadPermissions = hasPermission(bootstrap, "permissions.read");
+  const canReadAuditLogs = hasPermissionAtScope(bootstrap, "audit_logs.read", "organization");
   const canReadFunnels = hasPermission(bootstrap, "crm.funnels.read");
   const canManageFunnels = hasPermission(bootstrap, "crm.funnels.manage");
   const canReadLeadDistribution = hasPermissionAtScope(bootstrap, "crm.leads.read", "organization");
@@ -333,23 +351,29 @@ export function App() {
           {bootstrap.organizations.length > 1 ? <select className="app-organization-card__select" value={activeOrganization?.id ?? ""} onChange={(event) => void handleOrganizationChange(event.target.value)} disabled={switchingOrganization} aria-label="Trocar organização">{bootstrap.organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}</select> : <ChevronIcon className="app-organization-card__chevron" />}
         </div>
         <nav className="app-nav">
-          {navigation.map((group) => <div className="app-nav__group" key={group.label}><p>{group.label}</p>{group.items.map((item) => {
-            const Icon = item.icon;
-            const available = navAvailable(item, bootstrap);
-            const active = available && normalizedPath() === item.path;
-            return available ? <a key={item.path} href={item.path} className={`app-nav__item${active ? " is-active" : ""}`} title={item.label} onClick={() => setMobileMenuOpen(false)}><Icon /><span>{item.label}</span></a> : <button key={item.path} type="button" className="app-nav__item" disabled aria-disabled="true" title={`${item.label} — será ativado na etapa do módulo`}><Icon /><span>{item.label}</span></button>;
-          })}</div>)}
+          {navigation.map((group) => {
+            const visibleItems = group.items.filter(
+              (item) => !item.platformPermission || navAvailable(item, bootstrap),
+            );
+            if (visibleItems.length === 0) return null;
+            return <div className="app-nav__group" key={group.label}><p>{group.label}</p>{visibleItems.map((item) => {
+              const Icon = item.icon;
+              const available = navAvailable(item, bootstrap);
+              const active = available && normalizedPath() === item.path;
+              return available ? <a key={item.path} href={item.path} className={`app-nav__item${active ? " is-active" : ""}`} title={item.label} onClick={() => setMobileMenuOpen(false)}><Icon /><span>{item.label}</span></a> : <button key={item.path} type="button" className="app-nav__item" disabled aria-disabled="true" title={`${item.label} — será ativado na etapa do módulo`}><Icon /><span>{item.label}</span></button>;
+            })}</div>;
+          })}
         </nav>
       </aside>
 
       <div className="app-main">
         <header className="app-topbar">
           <div className="app-topbar__left"><button className="app-mobile-menu" type="button" onClick={() => setMobileMenuOpen(true)} aria-label="Abrir menu"><MenuIcon /></button><div className="app-breadcrumb" aria-label="Breadcrumb"><span>{page.group}</span><ChevronIcon /><strong>{page.label}</strong></div></div>
-          <div className="app-topbar__actions"><button className="app-icon-button" type="button" disabled title="Central de notificações será ativada com os módulos" aria-label="Notificações"><BellIcon /></button><div className="app-user-menu"><button className="app-user-menu__trigger" type="button" onClick={() => setUserMenuOpen((value) => !value)} aria-expanded={userMenuOpen}><span className="app-avatar">{bootstrap.user.avatarUrl ? <img src={bootstrap.user.avatarUrl} alt="" /> : initials(bootstrap.user.displayName)}</span><span className="app-user-menu__name">{bootstrap.user.firstName || bootstrap.user.displayName}</span><ChevronIcon /></button>{userMenuOpen && <div className="app-user-menu__panel"><div className="app-user-menu__identity"><strong>{bootstrap.user.displayName}</strong><span>{bootstrap.user.email}</span><small>{roleLabel(bootstrap)}</small></div><button type="button" onClick={handleLogout}><LogoutIcon /> Sair</button></div>}</div></div>
+          <div className="app-topbar__actions">{activeOrganization ? <NotificationCenter organizationId={activeOrganization.id}/> : <button className="app-icon-button" type="button" disabled aria-label="Notificações"><BellIcon /></button>}<div className="app-user-menu"><button className="app-user-menu__trigger" type="button" onClick={() => setUserMenuOpen((value) => !value)} aria-expanded={userMenuOpen}><span className="app-avatar">{bootstrap.user.avatarUrl ? <img src={bootstrap.user.avatarUrl} alt="" /> : initials(bootstrap.user.displayName)}</span><span className="app-user-menu__name">{bootstrap.user.firstName || bootstrap.user.displayName}</span><ChevronIcon /></button>{userMenuOpen && <div className="app-user-menu__panel"><div className="app-user-menu__identity"><strong>{bootstrap.user.displayName}</strong><span>{bootstrap.user.email}</span><small>{roleLabel(bootstrap)}</small></div><button type="button" onClick={handleLogout}><LogoutIcon /> Sair</button></div>}</div></div>
         </header>
 
         <main className="app-content">
-          {!activeOrganization ? <section className="app-empty-organization"><BuildingIcon /><h1>Nenhuma organização ativa</h1><p>Sua conta está autenticada, mas não possui uma organização ativa disponível.</p></section> : page.key === "settings" ? (canReadSettings ? <SettingsPage organizationId={activeOrganization.id} currentMembershipId={activeOrganization.membershipId} canUpdate={canUpdateSettings} canReadUsers={canReadUsers} canUpdateUsers={canUpdateUsers} canInviteUsers={canInviteUsers} canReadTeams={canReadTeams} canManageTeams={canManageTeams} canReadRoles={canReadRoles} canManageRoles={canManageRoles} canReadPermissions={canReadPermissions} canReadFunnels={canReadFunnels} canManageFunnels={canManageFunnels} canReadLeadDistribution={canReadLeadDistribution} canManageLeadDistribution={canManageLeadDistribution} onUpdated={() => load(activeOrganization.id)} /> : <ModuleAccessDenied title="Configurações" />) : page.key === "reports" ? (canReadReports ? <ReportsPage organizationId={activeOrganization.id} /> : <ModuleAccessDenied title="Relatórios" />) : page.key === "finance" ? (canReadFinance ? <FinancePage organizationId={activeOrganization.id} canCreate={canCreateFinance} canUpdate={canUpdateFinance} /> : <ModuleAccessDenied title="Financeiro" />) : page.key === "inspectionEditor" ? (canReadInspections ? <InspectionEditorPage organizationId={activeOrganization.id} canCreate={canCreateInspection} canUpdate={canUpdateInspection} /> : <ModuleAccessDenied title="Laudo / vistoria" />) : page.key === "inspections" ? (canReadInspections ? <InspectionsPage organizationId={activeOrganization.id} canCreate={canCreateInspection} /> : <ModuleAccessDenied title="Laudos & vistorias" />) : page.key === "contractEditor" ? (canReadContracts ? <ContractEditorPage organizationId={activeOrganization.id} canCreate={canCreateContract} canUpdate={canUpdateContract} /> : <ModuleAccessDenied title="Contrato" />) : page.key === "contracts" ? (canReadContracts ? <ContractsPage organizationId={activeOrganization.id} canCreate={canCreateContract} /> : <ModuleAccessDenied title="Contratos gerados" />) : page.key === "publications" ? (canReadPublications ? <PublicationsPage organizationId={activeOrganization.id} canCreate={canCreatePublication} canUpdate={canUpdatePublication} /> : <ModuleAccessDenied title="Publicações" />) : page.key === "authorizationEditor" ? (canReadAuthorizations ? <AuthorizationEditorPage organizationId={activeOrganization.id} canCreate={canCreateAuthorization} canUpdate={canUpdateAuthorization} /> : <ModuleAccessDenied title="Autorização" />) : page.key === "authorizations" ? (canReadAuthorizations ? <AuthorizationsPage organizationId={activeOrganization.id} canCreate={canCreateAuthorization} /> : <ModuleAccessDenied title="Autorizações" />) : page.key === "propertyEditor" ? (canReadProperties ? <PropertyEditorPage organizationId={activeOrganization.id} canCreate={canCreateProperty} canUpdate={canUpdateProperty} canReadAuthorizations={canReadAuthorizations} canCreateAuthorization={canCreateAuthorization} canReadPublications={canReadPublications} canCreatePublication={canCreatePublication} /> : <ModuleAccessDenied title="Imóvel" />) : page.key === "properties" ? (canReadProperties ? <PropertiesPage organizationId={activeOrganization.id} canCreate={canCreateProperty} /> : <ModuleAccessDenied title="Catálogo de imóveis" />) : page.key === "opportunityDetail" ? (hasPermission(bootstrap, "crm.opportunities.read") ? <OpportunityDetailPage organizationId={activeOrganization.id} canUpdate={canUpdateOpportunity} canReadTask={canReadTask} canCreateTask={canCreateTask} canUpdateTask={canUpdateTask} canReadVisit={hasPermission(bootstrap, "productivity.visits.read")} canCreateVisit={canCreateVisit} canUpdateVisit={canUpdateVisit} canReadProperties={canReadProperties} canCreateProperty={canCreateProperty} /> : <ModuleAccessDenied title="Oportunidade" />) : page.key === "tasks" ? (hasPermission(bootstrap, "productivity.tasks.read") ? <TasksPage organizationId={activeOrganization.id} canCreate={canCreateTask} canUpdate={canUpdateTask} /> : <ModuleAccessDenied title="Quadro de tarefas" />) : page.key === "agenda" ? (hasPermission(bootstrap, "productivity.calendar.read") ? <AgendaPage organizationId={activeOrganization.id} canCreate={canCreateCalendarEvent} /> : <ModuleAccessDenied title="Agenda" />) : page.key === "visits" ? (hasPermission(bootstrap, "productivity.visits.read") ? <VisitsPage organizationId={activeOrganization.id} canCreate={canCreateVisit} canUpdate={canUpdateVisit} canReadContacts={canReadContacts} canReadOpportunities={canReadOpportunities} canReadProperties={canReadProperties} /> : <ModuleAccessDenied title="Gestão de visitas" />) : page.key === "buyersFunnel" ? (hasPermission(bootstrap, "crm.opportunities.read") ? <FunnelPage organizationId={activeOrganization.id} funnelCode="buyers" canCreate={canCreateOpportunity} canUpdate={canUpdateOpportunity} /> : <ModuleAccessDenied title="Funil de compradores" />) : page.key === "captureFunnel" ? (hasPermission(bootstrap, "crm.opportunities.read") ? <FunnelPage organizationId={activeOrganization.id} funnelCode="capture" canCreate={canCreateOpportunity} canUpdate={canUpdateOpportunity} /> : <ModuleAccessDenied title="Funil de captação" />) : page.key === "clients" ? (hasPermission(bootstrap, "crm.contacts.read") ? <ClientsPage organizationId={activeOrganization.id} canCreate={canCreateContact} /> : <ModuleAccessDenied title="Clientes" />) : page.key === "leads" ? (hasPermission(bootstrap, "crm.leads.read") ? <LeadsPage organizationId={activeOrganization.id} canManage={canManageLeads} /> : <ModuleAccessDenied title="Leads do site" />) : <OverviewPage bootstrap={bootstrap} />}
+          {page.key === "platformAdmin" ? (canManagePlatform ? <PlatformAdminPage /> : <ModuleAccessDenied title="Administração da plataforma" />) : !activeOrganization ? <section className="app-empty-organization"><BuildingIcon /><h1>Nenhuma organização ativa</h1><p>Sua conta está autenticada, mas não possui uma organização ativa disponível.</p></section> : page.key === "settings" ? (canReadSettings ? <SettingsPage organizationId={activeOrganization.id} currentMembershipId={activeOrganization.membershipId} canUpdate={canUpdateSettings} canReadUsers={canReadUsers} canUpdateUsers={canUpdateUsers} canInviteUsers={canInviteUsers} canReadTeams={canReadTeams} canManageTeams={canManageTeams} canReadRoles={canReadRoles} canManageRoles={canManageRoles} canReadPermissions={canReadPermissions} canReadAuditLogs={canReadAuditLogs} canReadFunnels={canReadFunnels} canManageFunnels={canManageFunnels} canReadLeadDistribution={canReadLeadDistribution} canManageLeadDistribution={canManageLeadDistribution} canReadContacts={canReadContacts} canCreateContact={canCreateContact} canReadProperties={canReadProperties} canCreateProperty={canCreateProperty} onUpdated={() => load(activeOrganization.id)} /> : <ModuleAccessDenied title="Configurações" />) : page.key === "reports" ? (canReadReports ? <ReportsPage organizationId={activeOrganization.id} /> : <ModuleAccessDenied title="Relatórios" />) : page.key === "finance" ? (canReadFinance ? <FinancePage organizationId={activeOrganization.id} canCreate={canCreateFinance} canUpdate={canUpdateFinance} /> : <ModuleAccessDenied title="Financeiro" />) : page.key === "inspectionEditor" ? (canReadInspections ? <InspectionEditorPage organizationId={activeOrganization.id} canCreate={canCreateInspection} canUpdate={canUpdateInspection} /> : <ModuleAccessDenied title="Laudo / vistoria" />) : page.key === "inspections" ? (canReadInspections ? <InspectionsPage organizationId={activeOrganization.id} canCreate={canCreateInspection} /> : <ModuleAccessDenied title="Laudos & vistorias" />) : page.key === "contractEditor" ? (canReadContracts ? <ContractEditorPage organizationId={activeOrganization.id} canCreate={canCreateContract} canUpdate={canUpdateContract} /> : <ModuleAccessDenied title="Contrato" />) : page.key === "contracts" ? (canReadContracts ? <ContractsPage organizationId={activeOrganization.id} canCreate={canCreateContract} /> : <ModuleAccessDenied title="Contratos gerados" />) : page.key === "publications" ? (canReadPublications ? <PublicationsPage organizationId={activeOrganization.id} canCreate={canCreatePublication} canUpdate={canUpdatePublication} /> : <ModuleAccessDenied title="Publicações" />) : page.key === "authorizationEditor" ? (canReadAuthorizations ? <AuthorizationEditorPage organizationId={activeOrganization.id} canCreate={canCreateAuthorization} canUpdate={canUpdateAuthorization} /> : <ModuleAccessDenied title="Autorização" />) : page.key === "authorizations" ? (canReadAuthorizations ? <AuthorizationsPage organizationId={activeOrganization.id} canCreate={canCreateAuthorization} /> : <ModuleAccessDenied title="Autorizações" />) : page.key === "propertyEditor" ? (canReadProperties ? <PropertyEditorPage organizationId={activeOrganization.id} canCreate={canCreateProperty} canUpdate={canUpdateProperty} canReadAuthorizations={canReadAuthorizations} canCreateAuthorization={canCreateAuthorization} canReadPublications={canReadPublications} canCreatePublication={canCreatePublication} /> : <ModuleAccessDenied title="Imóvel" />) : page.key === "properties" ? (canReadProperties ? <PropertiesPage organizationId={activeOrganization.id} canCreate={canCreateProperty} /> : <ModuleAccessDenied title="Catálogo de imóveis" />) : page.key === "opportunityDetail" ? (hasPermission(bootstrap, "crm.opportunities.read") ? <OpportunityDetailPage organizationId={activeOrganization.id} canUpdate={canUpdateOpportunity} canReadTask={canReadTask} canCreateTask={canCreateTask} canUpdateTask={canUpdateTask} canReadVisit={hasPermission(bootstrap, "productivity.visits.read")} canCreateVisit={canCreateVisit} canUpdateVisit={canUpdateVisit} canReadProperties={canReadProperties} canCreateProperty={canCreateProperty} /> : <ModuleAccessDenied title="Oportunidade" />) : page.key === "tasks" ? (hasPermission(bootstrap, "productivity.tasks.read") ? <TasksPage organizationId={activeOrganization.id} canCreate={canCreateTask} canUpdate={canUpdateTask} /> : <ModuleAccessDenied title="Quadro de tarefas" />) : page.key === "agenda" ? (hasPermission(bootstrap, "productivity.calendar.read") ? <AgendaPage organizationId={activeOrganization.id} canCreate={canCreateCalendarEvent} /> : <ModuleAccessDenied title="Agenda" />) : page.key === "visits" ? (hasPermission(bootstrap, "productivity.visits.read") ? <VisitsPage organizationId={activeOrganization.id} canCreate={canCreateVisit} canUpdate={canUpdateVisit} canReadContacts={canReadContacts} canReadOpportunities={canReadOpportunities} canReadProperties={canReadProperties} /> : <ModuleAccessDenied title="Gestão de visitas" />) : page.key === "buyersFunnel" ? (hasPermission(bootstrap, "crm.opportunities.read") ? <FunnelPage organizationId={activeOrganization.id} funnelCode="buyers" canCreate={canCreateOpportunity} canUpdate={canUpdateOpportunity} /> : <ModuleAccessDenied title="Funil de compradores" />) : page.key === "captureFunnel" ? (hasPermission(bootstrap, "crm.opportunities.read") ? <FunnelPage organizationId={activeOrganization.id} funnelCode="capture" canCreate={canCreateOpportunity} canUpdate={canUpdateOpportunity} /> : <ModuleAccessDenied title="Funil de captação" />) : page.key === "clients" ? (hasPermission(bootstrap, "crm.contacts.read") ? <ClientsPage organizationId={activeOrganization.id} canCreate={canCreateContact} /> : <ModuleAccessDenied title="Clientes" />) : page.key === "leads" ? (hasPermission(bootstrap, "crm.leads.read") ? <LeadsPage organizationId={activeOrganization.id} canManage={canManageLeads} /> : <ModuleAccessDenied title="Leads do site" />) : <OverviewPage bootstrap={bootstrap} />}
         </main>
       </div>
     </div>

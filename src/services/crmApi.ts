@@ -83,7 +83,20 @@ export interface LeadListResult {
     campaign: string | null;
     sourcePage: string | null;
     context: { relatedPropertyId: string | null; propertyType: string | null; city: string | null; state: string | null };
-    sla: { firstResponseMinutes: number; dueAt: string; breached: boolean };
+    sla: {
+      firstResponseMinutes: number;
+      warningAt: string;
+      dueAt: string;
+      state: "healthy" | "warning" | "breached" | "responded_on_time" | "responded_late" | "closed";
+      breached: boolean;
+      firstResponseAt: string | null;
+      firstResponseMembershipId: string | null;
+      firstResponseElapsedMinutes: number | null;
+      notifications: {
+        warning: { milestoneAt: string; emittedAt: string } | null;
+        breach: { milestoneAt: string; emittedAt: string } | null;
+      };
+    };
     responsible: { membershipId: string; displayName: string } | null;
     receivedAt: string;
   }>;
@@ -210,6 +223,27 @@ export async function assignLead(
     organizationId,
     `/crm/leads/${encodeURIComponent(leadId)}/assignment`,
     { method: "PATCH", body: JSON.stringify({ membershipId }) },
+  );
+}
+
+export interface LeadFirstResponseResult {
+  id: string;
+  intent: LeadIntent;
+  status: LeadStatus;
+  changed: boolean;
+  firstResponseAt: string;
+  firstResponseMembershipId: string | null;
+  sla: { firstResponseMinutes: number; dueAt: string; breached: boolean };
+}
+
+export async function recordLeadFirstResponse(
+  organizationId: string,
+  leadId: string,
+): Promise<LeadFirstResponseResult> {
+  return tenantRequest<LeadFirstResponseResult>(
+    organizationId,
+    `/crm/leads/${encodeURIComponent(leadId)}/first-response`,
+    { method: "POST" },
   );
 }
 

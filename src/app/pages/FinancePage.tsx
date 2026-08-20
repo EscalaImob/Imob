@@ -26,9 +26,9 @@ const statusLabels: Record<FinancialStatus, string> = {
   reversed: "Estornado",
 };
 
-function money(value: string | null | undefined) {
+function money(value: string | null | undefined, currency: "BRL" | "USD" | "EUR" = "BRL") {
   const number = Number(value ?? 0);
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number.isFinite(number) ? number : 0);
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency }).format(Number.isFinite(number) ? number : 0);
 }
 
 function dateLabel(value: string | null | undefined) {
@@ -75,13 +75,14 @@ export function FinancePage({ organizationId, canCreate, canUpdate }: Props) {
   }, [organizationId, query, refreshKey]);
 
   const summary = result?.summary;
+  const currency = result?.currency ?? "BRL";
   const metrics = [
-    { label: "Saldo realizado", value: money(summary?.balance), helper: "Entradas liquidadas menos saídas" },
-    { label: "Entradas", value: money(summary?.inflows), helper: "Recebimentos realizados" },
-    { label: "Saídas", value: money(summary?.outflows), helper: "Pagamentos realizados" },
-    { label: "Vencidas", value: money(summary?.overdueAmount), helper: `${summary?.overdueCount ?? 0} lançamento(s)` },
-    { label: "A vencer (30 dias)", value: money(summary?.dueNext30Amount), helper: `${summary?.dueNext30Count ?? 0} lançamento(s)` },
-    { label: "Projeção", value: money(summary?.projectedBalance), helper: "Saldo considerando lançamentos ativos" },
+    { label: "Saldo realizado", value: money(summary?.balance, currency), helper: "Entradas liquidadas menos saídas" },
+    { label: "Entradas", value: money(summary?.inflows, currency), helper: "Recebimentos realizados" },
+    { label: "Saídas", value: money(summary?.outflows, currency), helper: "Pagamentos realizados" },
+    { label: "Vencidas", value: money(summary?.overdueAmount, currency), helper: `${summary?.overdueCount ?? 0} lançamento(s)` },
+    { label: "A vencer (30 dias)", value: money(summary?.dueNext30Amount, currency), helper: `${summary?.dueNext30Count ?? 0} lançamento(s)` },
+    { label: "Projeção", value: money(summary?.projectedBalance, currency), helper: "Saldo considerando lançamentos ativos" },
   ];
 
   function clearFilters() {
@@ -120,8 +121,8 @@ export function FinancePage({ organizationId, canCreate, canUpdate }: Props) {
             <span><strong>{item.description}</strong><small>{item.contact?.name ?? item.supplierName ?? "Sem contraparte definida"}</small></span>
             <span><em className={`app-finance-direction ${item.direction}`}>{item.direction === "income" ? "Entrada" : "Saída"}</em></span>
             <span>{dateLabel(item.dueDate)}</span>
-            <span><strong>{money(item.amount)}</strong></span>
-            <span>{money(item.settledAmount)}</span>
+            <span><strong>{money(item.amount, currency)}</strong></span>
+            <span>{money(item.settledAmount, currency)}</span>
             <span><strong>{item.account?.name ?? "—"}</strong><small>{item.category?.name ?? "Sem categoria"}</small></span>
             <span><strong>{item.contract?.title ?? item.opportunity?.title ?? item.property?.title ?? "—"}</strong><small>{item.property?.internalCode ?? item.costCenter?.name ?? "Sem vínculo operacional"}</small></span>
             <span><em className={`app-status-pill finance-${item.status}`}>{transactionStatusLabel(item)}</em></span>

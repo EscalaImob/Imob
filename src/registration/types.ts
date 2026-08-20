@@ -8,6 +8,8 @@ export interface RegistrationFormState {
   email: string;
   phoneCountryCode: string;
   phoneNumber: string;
+  cpf: string;
+  accessKey: string;
   password: string;
   companyName: string;
   marketProfile: string;
@@ -29,6 +31,8 @@ export const initialRegistrationFormState: RegistrationFormState = {
   email: "",
   phoneCountryCode: "+55",
   phoneNumber: "",
+  cpf: "",
+  accessKey: "",
   password: "",
   companyName: "",
   marketProfile: "",

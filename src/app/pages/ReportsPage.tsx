@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AppApiError } from "../../services/appApi";
 import { getOperationalReport, type OperationalCriticalItem, type OperationalCriticalItemKind, type OperationalReportFilters, type OperationalReportResult } from "../../services/reportsApi";
-import { ChartIcon, ClipboardIcon, ContractIcon, DocumentIcon, PinIcon, TasksIcon } from "../icons";
+import { ChartIcon, ClipboardIcon, ContractIcon, DocumentIcon, PinIcon, TasksIcon, WalletIcon } from "../icons";
 
 interface Props { organizationId: string; }
 
@@ -12,6 +12,7 @@ function localIsoDate(date: Date) {
 function initialFilters(): OperationalReportFilters { const to = new Date(); const from = new Date(to); from.setDate(from.getDate() - 29); return { from: localIsoDate(from), to: localIsoDate(to), view: "all" }; }
 function dateLabel(value: string | null | undefined) { if (!value) return "—"; const date = /^\d{4}-\d{2}-\d{2}$/u.test(value) ? new Date(`${value}T12:00:00`) : new Date(value); return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(date); }
 function dateTimeLabel(value: string | null | undefined) { if (!value) return "—"; const date = new Date(value); return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(date); }
+function money(value: string | null | undefined, currency: "BRL" | "USD" | "EUR") { const parsed = Number(value ?? 0); return new Intl.NumberFormat("pt-BR", { style: "currency", currency }).format(Number.isFinite(parsed) ? parsed : 0); }
 function criticalKindLabel(kind: OperationalCriticalItemKind) { return ({ task: "Tarefa", visit: "Visita", authorization: "Autorização", authorization_document: "Documento", contract: "Contrato", inspection: "Laudo / vistoria" } as const)[kind]; }
 function criticalHref(item: OperationalCriticalItem) { if (item.kind === "task") return "/app/tarefas/"; if (item.kind === "visit") return "/app/visitas/"; if (item.kind === "authorization" || item.kind === "authorization_document") return `/app/autorizacao/?id=${encodeURIComponent(item.id)}`; if (item.kind === "contract") return `/app/contrato/?id=${encodeURIComponent(item.id)}`; return `/app/vistoria/?id=${encodeURIComponent(item.id)}`; }
 function csvCell(value: string | number | null | undefined) { let text = String(value ?? ""); if (/^[=+\-@]/u.test(text)) text = `'${text}`; return `"${text.replace(/"/gu, '""')}"`; }
@@ -23,7 +24,8 @@ function downloadCsv(report: OperationalReportResult) {
     ["Visitas no período", report.visits.totalInPeriod], ["Visitas realizadas", report.visits.completedInPeriod], ["Visitas vencidas", report.visits.overdueCurrent],
     ["Autorizações ativas", report.authorizations.activeCurrent], ["Autorizações a vencer em 30 dias", report.authorizations.expiringNext30Days], ["Autorizações vencidas", report.authorizations.expiredCurrent], ["Documentos de autorização pendentes", report.authorizations.documentsPendingCurrent],
     ["Contratos ativos", report.contracts.activeCurrent], ["Contratos a vencer em 30 dias", report.contracts.expiringNext30Days], ["Contratos vencidos", report.contracts.expiredCurrent],
-    ["Laudos / vistorias em aberto", report.inspections.openCurrent], ["Laudos / vistorias concluídos no período", report.inspections.completedInPeriod], ["Laudos / vistorias vencidos", report.inspections.overdueCurrent], [],
+    ["Laudos / vistorias em aberto", report.inspections.openCurrent], ["Laudos / vistorias concluídos no período", report.inspections.completedInPeriod], ["Laudos / vistorias vencidos", report.inspections.overdueCurrent],
+    ["Entradas financeiras no período", money(report.finance.inflowsInPeriod, report.finance.currency)], ["Saídas financeiras no período", money(report.finance.outflowsInPeriod, report.finance.currency)], ["Saldo realizado no período", money(report.finance.realizedBalanceInPeriod, report.finance.currency)], ["Financeiro vencido", money(report.finance.overdueAmount, report.finance.currency)], [],
     ["Pendências críticas"], ["Tipo", "Título", "Descrição", "Responsável", "Prazo", "Severidade"],
     ...report.criticalItems.map((item) => [criticalKindLabel(item.kind), item.title, item.description, item.responsibleName ?? "—", dateTimeLabel(item.dueAt), item.severity === "danger" ? "Crítica" : "Atenção"]),
   ];
@@ -50,6 +52,7 @@ export function ReportsPage({ organizationId }: Props) {
     { label: "Autorizações a vencer", value: report.authorizations.expiringNext30Days, helper: "Próximos 30 dias", tone: report.authorizations.expiringNext30Days ? "warning" : "default" },
     { label: "Contratos a vencer", value: report.contracts.expiringNext30Days, helper: "Próximos 30 dias", tone: report.contracts.expiringNext30Days ? "warning" : "default" },
     { label: "Laudos em aberto", value: report.inspections.openCurrent, helper: `${report.inspections.overdueCurrent} vencido(s)`, tone: report.inspections.overdueCurrent ? "danger" : "default" },
+    { label: "Saldo financeiro", value: money(report.finance.realizedBalanceInPeriod, report.finance.currency), helper: `${report.finance.overdueCount} vencido(s) · ${money(report.finance.overdueAmount, report.finance.currency)}`, tone: report.finance.overdueCount ? "danger" : "default" },
   ] : [], [report]);
 
   return <>
@@ -58,7 +61,7 @@ export function ReportsPage({ organizationId }: Props) {
       <button className="app-primary-button" type="button" disabled={!report || loading} onClick={() => { if (report) downloadCsv(report); }}>Exportar CSV</button>
     </section>
 
-    <section className="app-context-banner app-reports-context"><ChartIcon/><div><strong>Relatório operacional consolidado</strong><p>Este primeiro painel reúne tarefas, visitas, autorizações, contratos e laudos. Os demais relatórios gerenciais entram nos próximos blocos.</p></div>{report && <span>Atualizado {dateTimeLabel(report.generatedAt)}</span>}</section>
+    <section className="app-context-banner app-reports-context"><ChartIcon/><div><strong>Relatório operacional consolidado</strong><p>Este painel reúne tarefas, visitas, autorizações, contratos, laudos e indicadores financeiros no mesmo escopo operacional.</p></div>{report && <span>Atualizado {dateTimeLabel(report.generatedAt)}</span>}</section>
 
     <section className="app-filter-panel app-reports-filters">
       <label><span>De</span><input type="date" value={filters.from} onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))}/></label>
@@ -77,6 +80,7 @@ export function ReportsPage({ organizationId }: Props) {
         <article className="app-data-card app-report-module"><header><DocumentIcon/><div><strong>Autorizações</strong><span>Situação atual</span></div></header><div><span><small>Ativas</small><strong>{report.authorizations.activeCurrent}</strong></span><span><small>A vencer</small><strong>{report.authorizations.expiringNext30Days}</strong></span><span><small>Vencidas</small><strong>{report.authorizations.expiredCurrent}</strong></span><span><small>Sem PDF</small><strong>{report.authorizations.documentsPendingCurrent}</strong></span></div><a href="/app/autorizacoes/">Abrir autorizações</a></article>
         <article className="app-data-card app-report-module"><header><ContractIcon/><div><strong>Contratos</strong><span>Situação atual</span></div></header><div><span><small>Ativos</small><strong>{report.contracts.activeCurrent}</strong></span><span><small>A vencer</small><strong>{report.contracts.expiringNext30Days}</strong></span><span><small>Vencidos</small><strong>{report.contracts.expiredCurrent}</strong></span><span><small>Janela</small><strong>30d</strong></span></div><a href="/app/contratos/">Abrir contratos</a></article>
         <article className="app-data-card app-report-module"><header><ClipboardIcon/><div><strong>Laudos & vistorias</strong><span>Situação atual e período</span></div></header><div><span><small>Em aberto</small><strong>{report.inspections.openCurrent}</strong></span><span><small>Em execução</small><strong>{report.inspections.inProgressCurrent}</strong></span><span><small>Em revisão</small><strong>{report.inspections.reviewCurrent}</strong></span><span><small>Concluídos</small><strong>{report.inspections.completedInPeriod}</strong></span></div><a href="/app/vistorias/">Abrir laudos</a></article>
+        <article className="app-data-card app-report-module"><header><WalletIcon/><div><strong>Financeiro</strong><span>Movimentação realizada no período</span></div></header><div><span><small>Entradas</small><strong>{money(report.finance.inflowsInPeriod, report.finance.currency)}</strong></span><span><small>Saídas</small><strong>{money(report.finance.outflowsInPeriod, report.finance.currency)}</strong></span><span><small>Saldo</small><strong>{money(report.finance.realizedBalanceInPeriod, report.finance.currency)}</strong></span><span><small>Vencido</small><strong>{money(report.finance.overdueAmount, report.finance.currency)}</strong></span></div><a href="/app/financeiro/">Abrir financeiro</a></article>
       </section>
 
       <section className="app-data-card app-report-critical-card">

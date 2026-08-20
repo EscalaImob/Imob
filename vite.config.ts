@@ -13,6 +13,7 @@ export default defineConfig({
         forgotPassword: "recuperar-senha/index.html",
         resetPassword: "redefinir-senha/index.html",
         app: "app/index.html",
+        appAdmin: "app/admin/index.html",
         appClients: "app/clientes/index.html",
         appLeads: "app/leads/index.html",
         appBuyersFunnel: "app/funis/compradores/index.html",

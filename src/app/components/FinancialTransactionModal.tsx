@@ -33,7 +33,7 @@ function statusLabel(status: FinancialStatus, direction: FinancialDirection) {
   if (status === "canceled") return "Cancelado";
   return "Estornado";
 }
-function emptyOptions(): FinancialOptions { return { accounts: [], categories: [], costCenters: [], assignees: [], contacts: [], properties: [], opportunities: [], contracts: [] }; }
+function emptyOptions(): FinancialOptions { return { settings: { currency: "BRL", defaultCommissionPercent: "5", requireCategory: false, requireAccount: false, requireCostCenter: false }, accounts: [], categories: [], costCenters: [], assignees: [], contacts: [], properties: [], opportunities: [], contracts: [] }; }
 const statusTransitions: Record<FinancialStatus, readonly FinancialStatus[]> = {
   forecast: ["forecast", "pending", "settled", "partial", "canceled"],
   pending: ["pending", "forecast", "settled", "partial", "overdue", "canceled"],
@@ -94,6 +94,9 @@ export function FinancialTransactionModal({ organizationId, transaction, onClose
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!fields.description.trim() || !fields.amount || !fields.competenceDate || !fields.dueDate || saving) return;
+    if (options.settings.requireCategory && !fields.categoryId) { setError("Selecione uma categoria antes de salvar o lançamento."); return; }
+    if (options.settings.requireAccount && !fields.accountId) { setError("Selecione uma conta antes de salvar o lançamento."); return; }
+    if (options.settings.requireCostCenter && !fields.costCenterId) { setError("Selecione um centro de custo antes de salvar o lançamento."); return; }
     if (sensitiveChange && !changeReason.trim()) { setError("Informe o motivo da alteração de valor, cancelamento ou estorno."); return; }
     setSaving(true); setError(null);
     const input: FinancialTransactionFields = {
@@ -123,9 +126,9 @@ export function FinancialTransactionModal({ organizationId, transaction, onClose
             <label><span>Competência *</span><input type="date" value={fields.competenceDate} onChange={(event) => set("competenceDate", event.target.value)} required /></label>
             <label><span>Vencimento *</span><input type="date" value={fields.dueDate} onChange={(event) => set("dueDate", event.target.value)} required /></label>
             <label><span>Pagamento / recebimento</span><input type="date" value={fields.settlementDate ?? ""} onChange={(event) => set("settlementDate", event.target.value || null)} /></label>
-            <label><span>Conta</span><select value={fields.accountId ?? ""} onChange={(event) => set("accountId", event.target.value || null)}><option value="">Sem conta definida</option>{options.accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-            <label><span>Categoria</span><select value={fields.categoryId ?? ""} onChange={(event) => set("categoryId", event.target.value || null)}><option value="">Sem categoria</option>{categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-            <label><span>Centro de custo</span><select value={fields.costCenterId ?? ""} onChange={(event) => set("costCenterId", event.target.value || null)}><option value="">Sem centro de custo</option>{options.costCenters.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+            <label><span>Conta{options.settings.requireAccount ? " *" : ""}</span><select value={fields.accountId ?? ""} onChange={(event) => set("accountId", event.target.value || null)}><option value="">Sem conta definida</option>{options.accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+            <label><span>Categoria{options.settings.requireCategory ? " *" : ""}</span><select value={fields.categoryId ?? ""} onChange={(event) => set("categoryId", event.target.value || null)}><option value="">Sem categoria</option>{categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+            <label><span>Centro de custo{options.settings.requireCostCenter ? " *" : ""}</span><select value={fields.costCenterId ?? ""} onChange={(event) => set("costCenterId", event.target.value || null)}><option value="">Sem centro de custo</option>{options.costCenters.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
             <label><span>Responsável</span><select value={fields.responsibleMembershipId ?? ""} onChange={(event) => set("responsibleMembershipId", event.target.value || null)}><option value="">Eu (padrão)</option>{options.assignees.map((item) => <option key={item.membershipId} value={item.membershipId}>{item.displayName}</option>)}</select></label>
             <label><span>Contrato</span><select value={fields.contractId ?? ""} onChange={(event) => applyContract(event.target.value)}><option value="">Sem contrato vinculado</option>{options.contracts.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
             <label><span>Oportunidade</span><select value={fields.opportunityId ?? ""} onChange={(event) => applyOpportunity(event.target.value)}><option value="">Sem oportunidade vinculada</option>{options.opportunities.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>

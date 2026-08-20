@@ -26,6 +26,7 @@ export interface AppBootstrapResult {
   activeOrganization: (AppOrganizationSummary & { logoUrl: string | null }) | null;
   roles: Array<{ code: string; name: string }>;
   permissions: Array<{ permissionCode: string; scope: AccessScope }>;
+  platformPermissions: string[];
 }
 
 export class AppApiError extends Error {
@@ -69,6 +70,8 @@ function isBootstrapResult(value: unknown): value is AppBootstrapResult {
       Array.isArray(data.organizations) &&
       Array.isArray(data.roles) &&
       Array.isArray(data.permissions) &&
+      Array.isArray(data.platformPermissions) &&
+      data.platformPermissions.every((permission) => typeof permission === "string") &&
       (data.activeOrganization === null ||
         (typeof data.activeOrganization === "object" &&
           typeof data.activeOrganization.id === "string" &&

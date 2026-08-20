@@ -5,6 +5,7 @@ import {
   assignLead,
   distributeLead,
   listLeads,
+  recordLeadFirstResponse,
   type LeadAssignmentResult,
   type LeadListResult,
 } from "../../services/crmApi";
@@ -35,9 +36,37 @@ function ruleMatchesLead(rule: OrganizationLeadDistributionPolicy["rules"][numbe
   }
   return Boolean(item.context.propertyType && item.context.propertyType === rule.propertyType);
 }
+function formatTime(value: string): string {
+  return new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+}
+
 function slaLabel(item: LeadListResult["items"][number]): string {
-  if (item.sla.breached) return "SLA vencido";
-  return `até ${new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(item.sla.dueAt))}`;
+  switch (item.sla.state) {
+    case "warning": return `atenção · até ${formatTime(item.sla.dueAt)}`;
+    case "breached": return "SLA vencido";
+    case "responded_on_time": return "Respondido no prazo";
+    case "responded_late": return "Respondido com atraso";
+    case "closed": return "SLA encerrado";
+    default: return `até ${formatTime(item.sla.dueAt)}`;
+  }
+}
+
+function slaClassName(item: LeadListResult["items"][number]): string {
+  if (item.sla.state === "warning") return "app-lead-sla is-warning";
+  if (item.sla.state === "breached" || item.sla.state === "responded_late") return "app-lead-sla is-breached";
+  if (item.sla.state === "responded_on_time") return "app-lead-sla is-responded";
+  if (item.sla.state === "closed") return "app-lead-sla is-closed";
+  return "app-lead-sla";
+}
+
+function slaCaption(item: LeadListResult["items"][number]): string {
+  if (item.sla.firstResponseAt) {
+    const elapsed = item.sla.firstResponseElapsedMinutes === null ? "" : ` · ${item.sla.firstResponseElapsedMinutes} min`;
+    return `1ª resposta ${formatTime(item.sla.firstResponseAt)}${elapsed}`;
+  }
+  if (item.sla.notifications.breach) return `Vencimento notificado · ${item.sla.firstResponseMinutes} min`;
+  if (item.sla.notifications.warning) return `Aviso emitido · ${item.sla.firstResponseMinutes} min`;
+  return `Aviso aos 80% · ${item.sla.firstResponseMinutes} min`;
 }
 
 function policyForIntent(
@@ -132,6 +161,28 @@ export function LeadsPage({ organizationId, canManage }: { organizationId: strin
     }
   }
 
+  async function registerFirstResponse(leadId: string) {
+    if (!canManage || busyLeadId) return;
+    setBusyLeadId(leadId);
+    setActionMessage(null);
+    try {
+      const result = await recordLeadFirstResponse(organizationId, leadId);
+      const refreshed = await listLeads(organizationId, { search: debouncedSearch, intent, status, page });
+      setData(refreshed);
+      setAssignmentDrafts(Object.fromEntries(refreshed.items.map((item) => [item.id, item.responsible?.membershipId ?? ""])));
+      setActionMessage({
+        type: "success",
+        text: result.sla.breached
+          ? "Primeira resposta registrada. O SLA permaneceu marcado como vencido no histórico."
+          : "Primeira resposta registrada dentro do SLA.",
+      });
+    } catch (responseError) {
+      setActionMessage({ type: "error", text: responseError instanceof AppApiError ? responseError.message : "Não foi possível registrar a primeira resposta." });
+    } finally {
+      setBusyLeadId(null);
+    }
+  }
+
   async function applyRoundRobin(leadId: string) {
     if (!canManage || busyLeadId) return;
     setBusyLeadId(leadId);
@@ -181,7 +232,7 @@ export function LeadsPage({ organizationId, canManage }: { organizationId: strin
               const busy = busyLeadId === item.id;
               const contextParts = [item.context.propertyType ? propertyTypeLabels.get(item.context.propertyType) ?? item.context.propertyType : null, [item.context.city, item.context.state].filter(Boolean).join("/") || null].filter(Boolean);
               const routingLabel = matchedRule ? `Regra ${matchedRule.priority} · ${matchedRule.teamName}` : policy?.teamName ?? "Toda a organização";
-              return <tr key={item.id}><td>{formatDateTime(item.receivedAt)}</td><td><strong>{item.name}</strong><small>{item.email || item.phone || "Sem contato informado"}</small></td><td><span className={`app-intent app-intent--${item.intent}`}>{item.intent === "capture" ? "Captação" : "Comprador"}</span></td><td><span className="app-lead-context">{contextParts.length ? contextParts.join(" · ") : "Sem contexto"}</span></td><td>{item.source}</td><td><span className="app-message-preview">{item.message || "—"}</span></td><td><span className={item.sla.breached ? "app-lead-sla is-breached" : "app-lead-sla"}>{slaLabel(item)}</span><small className="app-lead-sla-caption">{item.sla.firstResponseMinutes} min</small></td><td><span className="app-lead-responsible">{item.responsible?.displayName ?? "Não atribuído"}</span></td><td><span className={`app-status app-status--${item.status}`}>{statusLabels.get(item.status) ?? item.status}</span></td>{canManage && <td><div className="app-lead-assignment-controls"><select aria-label={`Responsável por ${item.name}`} value={draftMembershipId} disabled={Boolean(busyLeadId)} onChange={(event) => setAssignmentDrafts((current) => ({ ...current, [item.id]: event.target.value }))}><option value="">Sem responsável</option>{eligibleMembers.map((member) => <option key={member.membershipId} value={member.membershipId}>{member.displayName}</option>)}</select><div><button type="button" className="app-secondary-button" disabled={Boolean(busyLeadId) || !assignmentChanged} onClick={() => void saveAssignment(item.id)}>{busy ? "Salvando..." : "Atribuir"}</button>{policy?.mode === "round_robin" && <button type="button" className="app-secondary-button" disabled={Boolean(busyLeadId) || eligibleMembers.length === 0} onClick={() => void applyRoundRobin(item.id)}>{busy ? "Distribuindo..." : "Rodízio"}</button>}</div><small>{policy ? `${policy.mode === "round_robin" ? "Rodízio" : "Manual"} · ${routingLabel}` : "Configuração indisponível"}</small></div></td>}</tr>;
+              return <tr key={item.id}><td>{formatDateTime(item.receivedAt)}</td><td><strong>{item.name}</strong><small>{item.email || item.phone || "Sem contato informado"}</small></td><td><span className={`app-intent app-intent--${item.intent}`}>{item.intent === "capture" ? "Captação" : "Comprador"}</span></td><td><span className="app-lead-context">{contextParts.length ? contextParts.join(" · ") : "Sem contexto"}</span></td><td>{item.source}</td><td><span className="app-message-preview">{item.message || "—"}</span></td><td><span className={slaClassName(item)}>{slaLabel(item)}</span><small className="app-lead-sla-caption">{slaCaption(item)}</small></td><td><span className="app-lead-responsible">{item.responsible?.displayName ?? "Não atribuído"}</span></td><td><span className={`app-status app-status--${item.status}`}>{statusLabels.get(item.status) ?? item.status}</span></td>{canManage && <td><div className="app-lead-assignment-controls"><select aria-label={`Responsável por ${item.name}`} value={draftMembershipId} disabled={Boolean(busyLeadId)} onChange={(event) => setAssignmentDrafts((current) => ({ ...current, [item.id]: event.target.value }))}><option value="">Sem responsável</option>{eligibleMembers.map((member) => <option key={member.membershipId} value={member.membershipId}>{member.displayName}</option>)}</select><div><button type="button" className="app-secondary-button" disabled={Boolean(busyLeadId) || !assignmentChanged} onClick={() => void saveAssignment(item.id)}>{busy ? "Salvando..." : "Atribuir"}</button>{policy?.mode === "round_robin" && <button type="button" className="app-secondary-button" disabled={Boolean(busyLeadId) || eligibleMembers.length === 0} onClick={() => void applyRoundRobin(item.id)}>{busy ? "Distribuindo..." : "Rodízio"}</button>}{!item.sla.firstResponseAt && (item.status === "new" || item.status === "in_progress") && <button type="button" className="app-secondary-button app-lead-first-response" disabled={Boolean(busyLeadId)} onClick={() => void registerFirstResponse(item.id)}>{busy ? "Registrando..." : "Registrar 1ª resposta"}</button>}</div><small>{item.sla.firstResponseAt ? "SLA de 1ª resposta encerrado e preservado" : policy ? `${policy.mode === "round_robin" ? "Rodízio" : "Manual"} · ${routingLabel}` : "Configuração indisponível"}</small></div></td>}</tr>;
             })}</tbody></table></div>
             <div className="app-pagination"><span>{data.totalItems} {data.totalItems === 1 ? "lead" : "leads"}</span><div><button type="button" disabled={data.page <= 1 || loading} onClick={() => setPage((value) => Math.max(1, value - 1))}>Anterior</button><span>{data.page} / {data.totalPages}</span><button type="button" disabled={data.page >= data.totalPages || loading} onClick={() => setPage((value) => value + 1)}>Próxima</button></div></div>
           </>

@@ -26,6 +26,7 @@ export interface OperationalReportVisits { totalInPeriod: number; scheduledInPer
 export interface OperationalReportAuthorizations { activeCurrent: number; expiringNext30Days: number; expiredCurrent: number; documentsPendingCurrent: number; }
 export interface OperationalReportContracts { activeCurrent: number; expiringNext30Days: number; expiredCurrent: number; }
 export interface OperationalReportInspections { openCurrent: number; draftCurrent: number; inProgressCurrent: number; reviewCurrent: number; completedInPeriod: number; overdueCurrent: number; }
+export interface OperationalReportFinance { currency: "BRL" | "USD" | "EUR"; inflowsInPeriod: string; outflowsInPeriod: string; realizedBalanceInPeriod: string; overdueAmount: string; overdueCount: number; }
 export type OperationalCriticalItemKind = "task" | "visit" | "authorization" | "authorization_document" | "contract" | "inspection";
 export type OperationalCriticalSeverity = "danger" | "warning";
 export interface OperationalCriticalItem { kind: OperationalCriticalItemKind; id: string; title: string; description: string; responsibleName: string | null; dueAt: string | null; severity: OperationalCriticalSeverity; }
@@ -37,6 +38,7 @@ export interface OperationalReportResult {
   authorizations: OperationalReportAuthorizations;
   contracts: OperationalReportContracts;
   inspections: OperationalReportInspections;
+  finance: OperationalReportFinance;
   criticalItems: OperationalCriticalItem[];
 }
 

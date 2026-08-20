@@ -43,12 +43,15 @@ export function AccountStep({
     { label: "Deve conter pelo menos 1 símbolo", ok: /[^\p{L}\p{N}\s]/u.test(value.password) },
   ];
   const normalizedPhone = value.phoneNumber.replace(/\D/g, "");
+  const normalizedCpf = value.cpf.replace(/\D/g, "");
   const canContinue = Boolean(
     value.firstName.trim() &&
       value.lastName.trim() &&
       /\S+@\S+\.\S+/.test(value.email) &&
       normalizedPhone.length >= 10 &&
       normalizedPhone.length <= 11 &&
+      normalizedCpf.length === 11 &&
+      value.accessKey.trim().length >= 20 &&
       rules.every((rule) => rule.ok),
   );
 
@@ -100,6 +103,8 @@ export function AccountStep({
         <TextField id="registration-first-name" label="Primeiro nome" placeholder="Digite seu nome" value={value.firstName} onChange={(e) => onChange({ firstName: e.target.value })} autoComplete="given-name" />
         <TextField id="registration-last-name" label="Sobrenome" placeholder="Digite seu sobrenome" value={value.lastName} onChange={(e) => onChange({ lastName: e.target.value })} autoComplete="family-name" />
         <TextField id="registration-email" label="Email" placeholder="nomeemail@gmail.com" type="email" value={value.email} onChange={(e) => onChange({ email: e.target.value })} autoComplete="email" />
+        <TextField id="registration-cpf" label="CPF" placeholder="000.000.000-00" value={value.cpf} onChange={(e) => onChange({ cpf: e.target.value.replace(/[^\d.-]/g, "").slice(0, 14) })} inputMode="numeric" autoComplete="off" />
+        <TextField id="registration-access-key" label="Chave de acesso" placeholder="Informe a chave recebida da Escala IMOB" value={value.accessKey} onChange={(e) => onChange({ accessKey: e.target.value.trimStart() })} autoComplete="off" />
 
         <label className="registration-field" htmlFor="registration-phone">
           <span>Número de telefone</span>

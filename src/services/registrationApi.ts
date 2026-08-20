@@ -6,6 +6,8 @@ export interface RegistrationPayload {
   email: string;
   phoneCountryCode: string;
   phoneNumber: string;
+  cpf: string;
+  accessKey: string;
   password: string;
 }
 
@@ -111,8 +113,15 @@ function isRegistrationResult(value: unknown): value is RegistrationResult {
 }
 
 function messageForError(status: number, payload: ApiErrorPayload | null): string {
-  if (status === 409 || payload?.error?.code === "EMAIL_ALREADY_REGISTERED") {
+  if (payload?.error?.code === "EMAIL_ALREADY_REGISTERED") {
     return "Já existe uma conta associada a este e-mail.";
+  }
+
+  if (
+    status === 403 ||
+    payload?.error?.code === "REGISTRATION_AUTHORIZATION_INVALID"
+  ) {
+    return "Não foi possível validar sua autorização de cadastro. Confira o CPF e a chave recebida.";
   }
 
   if (status === 422) {

@@ -50,12 +50,13 @@ export interface FinancialTransactionListItem {
   responsible: { membershipId: string; displayName: string } | null; supplierName: string | null; notes: string | null; createdAt: string; updatedAt: string;
 }
 export interface FinancialSummary { balance: string; inflows: string; outflows: string; overdueAmount: string; overdueCount: number; dueNext30Amount: string; dueNext30Count: number; projectedBalance: string; }
-export interface FinancialTransactionListResult { summary: FinancialSummary; items: FinancialTransactionListItem[]; page: number; pageSize: number; totalItems: number; totalPages: number; }
+export interface FinancialTransactionListResult { currency: "BRL" | "USD" | "EUR"; summary: FinancialSummary; items: FinancialTransactionListItem[]; page: number; pageSize: number; totalItems: number; totalPages: number; }
 export interface FinancialTransactionDetail extends FinancialTransactionListItem {
   categoryId: string | null; accountId: string | null; costCenterId: string | null; contractId: string | null; opportunityId: string | null; propertyId: string | null; contactId: string | null; responsibleMembershipId: string | null;
   timeline: Array<{ id: string; eventType: string; actor: { userId: string; displayName: string } | null; data: Record<string, unknown>; createdAt: string }>;
 }
 export interface FinancialOptions {
+  settings: { currency: "BRL" | "USD" | "EUR"; defaultCommissionPercent: string; requireCategory: boolean; requireAccount: boolean; requireCostCenter: boolean };
   accounts: Array<{ id: string; name: string; type: FinancialAccountType }>;
   categories: Array<{ id: string; name: string; direction: FinancialDirection | "both" }>;
   costCenters: Array<{ id: string; name: string }>;

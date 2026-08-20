@@ -50,10 +50,13 @@ export function RegistrationApp() {
         email: form.email,
         phoneCountryCode: form.phoneCountryCode,
         phoneNumber: form.phoneNumber,
+        cpf: form.cpf,
+        accessKey: form.accessKey,
         password: form.password,
       });
 
       saveOnboardingSession(result);
+      setForm((current) => ({ ...current, accessKey: "" }));
 
       let avatarWarning: string | null = null;
       if (form.avatarFile) {
