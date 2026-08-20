@@ -341,7 +341,7 @@ export function FunnelPage({ organizationId, funnelCode, canCreate, canUpdate }:
     <>
       <section className="app-section-header">
         <div><span className="app-section-eyebrow">CRM & Vendas</span><h1>{title}</h1><p>{subtitle}</p></div>
-        {canCreate && <button type="button" className="app-primary-button" onClick={() => setCreateOpen(true)}>+ Nova oportunidade</button>}
+        <div className="app-heading-actions"><a className="app-secondary-button" href="/app/configuracoes/?section=operational">Editar etapas e cores</a>{canCreate && <button type="button" className="app-primary-button" onClick={() => setCreateOpen(true)}>+ Nova oportunidade</button>}</div>
       </section>
 
       <section className="app-funnel-summary" aria-label="Resumo do funil">

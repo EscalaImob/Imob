@@ -89,6 +89,7 @@ import {
   type OrganizationTeam,
 } from "../../services/organizationSettingsApi";
 import { BellIcon, BuildingIcon, DocumentIcon, GlobeIcon, SettingsIcon, UsersIcon } from "../icons";
+import { applyPanelTheme, defaultPanelTheme, readPanelTheme, resetPanelTheme, savePanelTheme, type PanelTheme } from "../panelTheme";
 
 interface Props {
   organizationId: string;
@@ -114,7 +115,7 @@ interface Props {
   onUpdated: () => Promise<void> | void;
 }
 
-type SettingsSection = "company" | "identity" | "properties" | "documents" | "financial" | "notifications" | "integrations" | "security" | "transfers" | "people" | "operational";
+type SettingsSection = "company" | "identity" | "appearance" | "properties" | "documents" | "financial" | "notifications" | "integrations" | "security" | "transfers" | "people" | "operational";
 
 type RoleGrantDraft = Record<string, OrganizationAccessScope | "">;
 interface RoleDraft {
@@ -552,7 +553,14 @@ export function SettingsPage({
   canCreateProperty,
   onUpdated,
 }: Props) {
-  const [section, setSection] = useState<SettingsSection>("company");
+  const initialSection = new URLSearchParams(globalThis.location.search).get("section");
+  const [section, setSection] = useState<SettingsSection>(initialSection === "transfers" || initialSection === "operational" || initialSection === "appearance" ? initialSection : "company");
+  const [panelTheme, setPanelTheme] = useState<PanelTheme>(() => readPanelTheme(organizationId, currentMembershipId));
+  const [panelThemeSaved, setPanelThemeSaved] = useState(false);
+  useEffect(() => { const loaded = readPanelTheme(organizationId, currentMembershipId); setPanelTheme(loaded); applyPanelTheme(loaded); }, [organizationId, currentMembershipId]);
+  function changePanelColor(field: keyof PanelTheme, value: string) { const next = { ...panelTheme, [field]: value.toUpperCase() }; setPanelTheme(next); setPanelThemeSaved(false); applyPanelTheme(next); }
+  function persistPanelTheme() { savePanelTheme(organizationId, currentMembershipId, panelTheme); setPanelThemeSaved(true); }
+  function restorePanelTheme() { resetPanelTheme(organizationId, currentMembershipId); setPanelTheme(defaultPanelTheme); setPanelThemeSaved(true); }
   const [settings, setSettings] = useState<OrganizationSettings | null>(null);
   const [draft, setDraft] = useState<OrganizationSettingsUpdate | null>(null);
   const [identity, setIdentity] = useState<OrganizationIdentitySettings | null>(null);
@@ -619,6 +627,7 @@ export function SettingsPage({
   const [creatingRole, setCreatingRole] = useState(false);
   const [roleBusyKey, setRoleBusyKey] = useState<string | null>(null);
   const [operationalFunnels, setOperationalFunnels] = useState<OrganizationOperationalFunnel[]>([]);
+  const [collapsedOperationalFunnels, setCollapsedOperationalFunnels] = useState<Set<string>>(() => new Set());
   const [operationalDrafts, setOperationalDrafts] = useState<Record<string, OperationalFunnelDraft>>({});
   const [operationalLoading, setOperationalLoading] = useState(false);
   const [operationalBusyId, setOperationalBusyId] = useState<string | null>(null);
@@ -630,6 +639,7 @@ export function SettingsPage({
   const [leadDistribution, setLeadDistribution] = useState<OrganizationLeadDistributionSettings | null>(null);
   const [leadDistributionDraftState, setLeadDistributionDraftState] = useState<OrganizationLeadDistributionSettingsUpdate | null>(null);
   const [leadDistributionBusy, setLeadDistributionBusy] = useState(false);
+  const [collapsedLeadPolicies, setCollapsedLeadPolicies] = useState<Set<"buyer" | "capture">>(() => new Set());
 
   useEffect(() => {
     let active = true;
@@ -1653,6 +1663,7 @@ export function SettingsPage({
       <aside className="app-data-card app-settings-menu" aria-label="Seções das configurações">
         <button type="button" className={section === "company" ? "is-active" : ""} onClick={() => setSection("company")}><BuildingIcon/><span><strong>Empresa</strong><small>Dados básicos da organização</small></span></button>
         <button type="button" className={section === "identity" ? "is-active" : ""} onClick={() => setSection("identity")}><GlobeIcon/><span><strong>Identidade e site</strong><small>Marca, logo e canais públicos</small></span></button>
+        <button type="button" className={section === "appearance" ? "is-active" : ""} onClick={() => setSection("appearance")}><SettingsIcon/><span><strong>Aparência do painel</strong><small>Cores exclusivas para minha conta</small></span></button>
         <button type="button" className={section === "properties" ? "is-active" : ""} onClick={() => setSection("properties")}><BuildingIcon/><span><strong>Configurações de imóveis</strong><small>Catálogos, padrões e regras</small></span></button>
         <button type="button" className={section === "documents" ? "is-active" : ""} onClick={() => setSection("documents")}><DocumentIcon/><span><strong>Configurações de documentos</strong><small>Modelos, numeração e assinatura</small></span></button>
         <button type="button" className={section === "financial" ? "is-active" : ""} onClick={() => setSection("financial")}><SettingsIcon/><span><strong>Configurações financeiras</strong><small>Categorias, contas, comissão e moeda</small></span></button>
@@ -1666,6 +1677,8 @@ export function SettingsPage({
       <div className="app-settings-content">
         {error && <div className="app-inline-error">{error}</div>}
         {success && <div className="app-inline-success">{success}</div>}
+
+        {section === "appearance" && <section className="app-data-card app-settings-card"><header><div><SettingsIcon/><span><strong>Cores do meu painel</strong><small>Preferência vinculada a esta conta e organização; não altera a experiência de outros usuários.</small></span></div><div className="app-document-export-actions"><button type="button" className="app-secondary-button" onClick={restorePanelTheme}>Restaurar padrão</button><button type="button" className="app-primary-button" onClick={persistPanelTheme}>Salvar cores</button></div></header><div className="app-theme-preview"/><div className="app-theme-grid">{([{ field: "primary", label: "Cor principal", note: "Botões, links, seleção ativa e destaques." }, { field: "accent", label: "Cor de apoio", note: "Detalhes visuais, gráficos e realces secundários." }, { field: "sidebar", label: "Fundo do menu", note: "Área de navegação lateral do painel." }, { field: "background", label: "Fundo do conteúdo", note: "Plano de fundo atrás dos cards e formulários." }, { field: "heading", label: "Títulos", note: "Títulos de páginas, cards, tabelas e módulos." }, { field: "subtitle", label: "Subtítulos", note: "Descrições abaixo dos títulos e textos introdutórios." }, { field: "content", label: "Conteúdo", note: "Valores, campos, linhas de tabelas e textos principais." }, { field: "muted", label: "Textos auxiliares", note: "Legendas, rótulos, datas, placeholders e observações." }, { field: "sidebarText", label: "Textos do menu", note: "Itens, grupos e informações da navegação lateral." }] as Array<{ field: keyof PanelTheme; label: string; note: string }>).map((option) => <label className="app-theme-color" key={option.field}><input type="color" value={panelTheme[option.field]} onChange={(event) => changePanelColor(option.field, event.target.value)}/><span><strong>{option.label}</strong><small>{option.note} · {panelTheme[option.field]}</small></span></label>)}</div>{panelThemeSaved && <div className="app-inline-success">Preferência de cores salva para sua conta.</div>}</section>}
 
         {section === "company" && (loading || !settings || !draft ? <section className="app-data-card app-settings-loading"><span className="app-spinner"/><p>Carregando configurações...</p></section> : <>
           <section className="app-data-card app-settings-card">
@@ -2046,15 +2059,17 @@ export function SettingsPage({
             {operationalFunnels.map((funnel) => {
               const draft = operationalDrafts[funnel.id] ?? operationalFunnelDraft(funnel);
               const busy = operationalBusyId === funnel.id;
+              const collapsed = collapsedOperationalFunnels.has(funnel.id);
               const dirtyFunnel = operationalFunnelDirty(funnel, draft);
               const stages = [...draft.stages].sort((a, b) => a.position - b.position);
               const archivedStages = funnel.stages.filter((stage) => stage.status === "archived").sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
               const newStageDraft = newStageDrafts[funnel.id] ?? { name: "", probability: "", color: "#64748B" };
               return <article key={funnel.id} className="app-settings-operational-funnel">
                 <header>
-                  <div><span className="app-settings-operational-code">{funnel.code === "buyers" ? "Compradores" : funnel.code === "capture" ? "Captação" : funnel.code}</span><label><span>Nome do funil</span><input value={draft.name} maxLength={120} disabled={!canManageFunnels || busy} onChange={(event) => setOperationalFunnelName(funnel.id, event.target.value)}/></label></div>
+                  <div><button className="app-settings-operational-code" type="button" aria-expanded={!collapsed} onClick={() => setCollapsedOperationalFunnels((current) => { const next = new Set(current); if (next.has(funnel.id)) next.delete(funnel.id); else next.add(funnel.id); return next; })}><span>{funnel.code === "buyers" ? "Compradores" : funnel.code === "capture" ? "Captação" : funnel.code}</span><b aria-hidden="true">{collapsed ? "+" : "−"}</b></button><label><span>Nome do funil</span><input value={draft.name} maxLength={120} disabled={!canManageFunnels || busy} onChange={(event) => setOperationalFunnelName(funnel.id, event.target.value)}/></label></div>
                   {canManageFunnels && <button className="app-primary-button" type="button" disabled={busy || !dirtyFunnel || !draft.name.trim() || stages.some((stage) => !stage.name.trim())} onClick={() => void saveOperationalFunnel(funnel)}>{busy ? "Salvando..." : "Salvar funil"}</button>}
                 </header>
+                {!collapsed && <div className="app-settings-operational-funnel-body">
                 {canManageFunnels && <div className="app-settings-operational-stage-create">
                   <label><span>Nova etapa</span><input value={newStageDraft.name} maxLength={120} disabled={Boolean(stageBusyKey)} onChange={(event) => setNewStageDrafts((current) => ({ ...current, [funnel.id]: { ...newStageDraft, name: event.target.value } }))} placeholder="Ex.: Em negociação"/></label>
                   <label><span>Probabilidade inicial</span><div className="app-settings-operational-probability"><input type="number" min="0" max="100" step="1" value={newStageDraft.probability} disabled={Boolean(stageBusyKey)} onChange={(event) => setNewStageDrafts((current) => ({ ...current, [funnel.id]: { ...newStageDraft, probability: event.target.value } }))}/><b>%</b></div></label>
@@ -2091,7 +2106,7 @@ export function SettingsPage({
                   })}</div>
                   <small className="app-settings-role-note">Oportunidades encerradas preservam o texto do motivo usado naquele momento, mesmo se o catálogo mudar depois.</small>
                 </section>
-                <small className="app-settings-role-note">Etapas de encerramento são protegidas. Uma etapa com oportunidades vinculadas só pode ser arquivada depois que esses registros forem movidos para outra etapa.</small>
+                <small className="app-settings-role-note">Etapas de encerramento são protegidas. Uma etapa com oportunidades vinculadas só pode ser arquivada depois que esses registros forem movidos para outra etapa.</small></div>}
               </article>;
             })}
           </div>}
@@ -2107,8 +2122,10 @@ export function SettingsPage({
                 const draftPolicy = leadDistributionDraftState[intentKey];
                 const selectedTeam = draftPolicy.teamId ? leadDistribution.teams.find((team) => team.id === draftPolicy.teamId) ?? null : null;
                 const eligibleMembers = selectedTeam?.members ?? leadDistribution.members;
+                const collapsedPolicy = collapsedLeadPolicies.has(intentKey);
                 return <article key={intentKey} className="app-settings-lead-distribution-policy">
-                  <div className="app-settings-lead-distribution-policy-heading"><span className={`app-intent app-intent--${intentKey}`}>{intentKey === "buyer" ? "Compradores" : "Captação"}</span><div><strong>{title}</strong><small>{description}</small></div></div>
+                  <button type="button" className="app-settings-lead-distribution-policy-heading" aria-expanded={!collapsedPolicy} onClick={() => setCollapsedLeadPolicies((current) => { const next = new Set(current); if (next.has(intentKey)) next.delete(intentKey); else next.add(intentKey); return next; })}><span className={`app-intent app-intent--${intentKey}`}>{intentKey === "buyer" ? "Compradores" : "Captação"}</span><div><strong>{title}</strong><small>{description}</small></div><b aria-hidden="true">{collapsedPolicy ? "+" : "−"}</b></button>
+                  {!collapsedPolicy && <div className="app-settings-lead-distribution-policy-body">
                   <div className="app-settings-lead-distribution-fields">
                     <label><span>Modo de distribuição</span><select value={draftPolicy.mode} disabled={!canManageLeadDistribution || leadDistributionBusy} onChange={(event) => setLeadDistributionDraftState((current) => current ? { ...current, [intentKey]: { ...current[intentKey], mode: event.target.value === "round_robin" ? "round_robin" : "manual" } } : current)}><option value="manual">Manual</option><option value="round_robin">Rodízio</option></select></label>
                     <label><span>Equipe padrão</span><select value={draftPolicy.teamId ?? ""} disabled={!canManageLeadDistribution || leadDistributionBusy} onChange={(event) => setLeadDistributionDraftState((current) => current ? { ...current, [intentKey]: { ...current[intentKey], teamId: event.target.value || null } } : current)}><option value="">Toda a organização</option>{leadDistribution.teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
@@ -2124,7 +2141,7 @@ export function SettingsPage({
                   <section className="app-settings-lead-rules">
                     <div className="app-settings-lead-rules-heading"><div><strong>Regras avançadas</strong><span>Prioridade de cima para baixo. A primeira combinação define a equipe do rodízio.</span></div>{canManageLeadDistribution && <div><button type="button" className="app-secondary-button" disabled={leadDistributionBusy || leadDistribution.teams.length === 0 || draftPolicy.rules.length >= 20} onClick={() => setLeadDistributionDraftState((current) => current ? { ...current, [intentKey]: { ...current[intentKey], rules: [...current[intentKey].rules, { kind: "region", regionState: "", regionCity: null, propertyType: null, teamId: leadDistribution.teams[0]?.id ?? "" }] } } : current)}>+ Região</button><button type="button" className="app-secondary-button" disabled={leadDistributionBusy || leadDistribution.teams.length === 0 || draftPolicy.rules.length >= 20} onClick={() => setLeadDistributionDraftState((current) => current ? { ...current, [intentKey]: { ...current[intentKey], rules: [...current[intentKey].rules, { kind: "property_type", regionState: null, regionCity: null, propertyType: "apartment", teamId: leadDistribution.teams[0]?.id ?? "" }] } } : current)}>+ Tipo de imóvel</button></div>}</div>
                     {draftPolicy.rules.length === 0 ? <div className="app-settings-lead-rules-empty">Nenhuma regra avançada. O rodízio usa a equipe padrão.</div> : <div className="app-settings-lead-rules-list">{draftPolicy.rules.map((rule, ruleIndex) => <div key={`${intentKey}-${ruleIndex}`} className="app-settings-lead-rule-row"><span className="app-settings-lead-rule-priority">{ruleIndex + 1}</span><select value={rule.kind} disabled={!canManageLeadDistribution || leadDistributionBusy} onChange={(event) => setLeadDistributionDraftState((current) => { if (!current) return current; const rules = [...current[intentKey].rules]; const nextKind = event.target.value === "property_type" ? "property_type" : "region"; rules[ruleIndex] = nextKind === "region" ? { kind: "region", regionState: "", regionCity: null, propertyType: null, teamId: rule.teamId } : { kind: "property_type", regionState: null, regionCity: null, propertyType: "apartment", teamId: rule.teamId }; return { ...current, [intentKey]: { ...current[intentKey], rules } }; })}><option value="region">Região</option><option value="property_type">Tipo de imóvel</option></select>{rule.kind === "region" ? <><input aria-label="UF da regra" maxLength={2} placeholder="UF" value={rule.regionState ?? ""} disabled={!canManageLeadDistribution || leadDistributionBusy} onChange={(event) => setLeadDistributionDraftState((current) => { if (!current) return current; const rules = [...current[intentKey].rules]; rules[ruleIndex] = { ...rule, regionState: event.target.value.toUpperCase() }; return { ...current, [intentKey]: { ...current[intentKey], rules } }; })}/><input aria-label="Cidade da regra" maxLength={120} placeholder="Cidade (opcional)" value={rule.regionCity ?? ""} disabled={!canManageLeadDistribution || leadDistributionBusy} onChange={(event) => setLeadDistributionDraftState((current) => { if (!current) return current; const rules = [...current[intentKey].rules]; rules[ruleIndex] = { ...rule, regionCity: event.target.value || null }; return { ...current, [intentKey]: { ...current[intentKey], rules } }; })}/></> : <select value={rule.propertyType ?? "apartment"} disabled={!canManageLeadDistribution || leadDistributionBusy} onChange={(event) => setLeadDistributionDraftState((current) => { if (!current) return current; const rules = [...current[intentKey].rules]; rules[ruleIndex] = { ...rule, propertyType: event.target.value as OrganizationLeadDistributionPropertyType }; return { ...current, [intentKey]: { ...current[intentKey], rules } }; })}>{leadDistributionPropertyTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>}<select aria-label="Equipe da regra" value={rule.teamId} disabled={!canManageLeadDistribution || leadDistributionBusy} onChange={(event) => setLeadDistributionDraftState((current) => { if (!current) return current; const rules = [...current[intentKey].rules]; rules[ruleIndex] = { ...rule, teamId: event.target.value }; return { ...current, [intentKey]: { ...current[intentKey], rules } }; })}>{leadDistribution.teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select>{canManageLeadDistribution && <button type="button" className="app-secondary-button" disabled={leadDistributionBusy} onClick={() => setLeadDistributionDraftState((current) => current ? { ...current, [intentKey]: { ...current[intentKey], rules: current[intentKey].rules.filter((_, index) => index !== ruleIndex) } } : current)}>Remover</button>}</div>)}</div>}
-                  </section>
+                  </section></div>}
                 </article>;
               })}
             </div>

@@ -160,7 +160,7 @@ export function ClientsPage({ organizationId, canCreate }: ClientsPageProps) {
           <h1>Gerenciar clientes</h1>
           <p>Uma base única para interessados, compradores, proprietários e demais relacionamentos.</p>
         </div>
-        {canCreate && <button className="app-primary-button" type="button" onClick={() => setModalOpen(true)}>+ Novo cliente</button>}
+        {canCreate && <div className="app-heading-actions"><a className="app-secondary-button" href="/app/configuracoes/?section=transfers&resource=contacts">Importar planilha</a><button className="app-primary-button" type="button" onClick={() => setModalOpen(true)}>+ Novo cliente</button></div>}
       </section>
 
       <section className="app-summary-cards" aria-label="Resumo de clientes">

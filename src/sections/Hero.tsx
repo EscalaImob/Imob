@@ -2,13 +2,14 @@ import { Brand } from "../components/Brand";
 import { PrimaryButton } from "../components/PrimaryButton";
 
 const scrollToDiagnostic = () => document.querySelector("#diagnostico-interativo")?.scrollIntoView({ behavior: "smooth" });
+const goToLogin = () => globalThis.location.assign("/login/");
 
 export function Hero() {
   return (
     <section className="hero" id="inicio">
       <header className="site-header content-width">
         <Brand />
-        <PrimaryButton onClick={scrollToDiagnostic}>Solicite seu diagnóstico</PrimaryButton>
+        <PrimaryButton onClick={goToLogin}>Login</PrimaryButton>
       </header>
 
       <div className="hero__content content-width">
