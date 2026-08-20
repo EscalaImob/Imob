@@ -90,7 +90,7 @@ Os itens abaixo são gerados automaticamente e não devem ser versionados:
 
 ## Handoff para a plataforma
 
-A página atual é o Diagnóstico Escala IMOB. O layout definitivo da plataforma será desenvolvido separadamente e, no futuro, o diagnóstico será movido para `/captura` — **essa mudança não deve ser feita agora**.
+A raiz `/` usa a tela de login existente. O Diagnóstico Escala IMOB foi preservado em `/captura/`, e `/login/` continua disponível por compatibilidade.
 
 As decisões de integração, responsabilidades do frontend e orientações para o próximo desenvolvedor estão em:
 
@@ -100,7 +100,7 @@ docs/FRONTEND_HANDOFF.md
 
 ## Fluxo de registro
 
-O cadastro/onboarding possui uma entrada estática própria em `/registro/`, sem alterar a landing/diagnóstico atual em `/`.
+O cadastro/onboarding possui uma entrada estática própria em `/registro/`. A raiz `/` é o login e o diagnóstico público fica em `/captura/`.
 
 Os assets finais do Figma devem ser colocados em `public/assets/registration/` com estes nomes exatos:
 
@@ -113,7 +113,7 @@ Enquanto esses arquivos não estiverem presentes, os componentes usam fallbacks 
 
 ## Registro da plataforma
 
-O frontend agora possui uma entrada multipágina em `/registro/`, baseada no Figma real do onboarding. A página atual em `/` continua sendo o diagnóstico existente.
+O frontend possui uma entrada multipágina em `/registro/`, baseada no Figma real do onboarding. A raiz `/` usa o login existente e o diagnóstico permanece disponível em `/captura/`.
 
 Fluxo visual atual:
 

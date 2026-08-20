@@ -7,6 +7,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: "index.html",
+        capture: "captura/index.html",
         registration: "registro/index.html",
         login: "login/index.html",
         verifyEmail: "verificar-email/index.html",
@@ -14,6 +15,7 @@ export default defineConfig({
         resetPassword: "redefinir-senha/index.html",
         app: "app/index.html",
         appAdmin: "app/admin/index.html",
+        appGoals: "app/metas/index.html",
         appClients: "app/clientes/index.html",
         appLeads: "app/leads/index.html",
         appBuyersFunnel: "app/funis/compradores/index.html",

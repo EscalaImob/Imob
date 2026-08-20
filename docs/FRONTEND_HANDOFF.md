@@ -13,9 +13,10 @@ O frontend mantém a página pública do **Diagnóstico Escala IMOB** e agora ta
 Rotas implementadas:
 
 ```text
-/                    → Diagnóstico Escala IMOB
+/                    → login Cognito via backend
+/captura/             → Diagnóstico Escala IMOB
 /registro/            → onboarding em 4 passos
-/login/               → login Cognito via backend
+/login/               → login Cognito via backend (compatibilidade)
 /verificar-email/     → confirmação por token Brevo
 /recuperar-senha/     → solicitação genérica de recuperação
 /redefinir-senha/     → redefinição por token de uso único
@@ -44,28 +45,19 @@ A sessão de onboarding e a sessão de login são separadas. O login salva token
 
 ---
 
-## 2. Decisão de rota futura
+## 2. Decisão de rota aplicada
 
-A página atual é **temporariamente a raiz** do domínio.
-
-### Agora
+A reorganização da entrada pública foi aplicada sem reescrever os fluxos existentes.
 
 ```text
-/  → Diagnóstico Escala IMOB
+/          → login Cognito já existente
+/captura/  → Diagnóstico Escala IMOB preservado
+/login/    → login mantido por compatibilidade
 ```
 
-### Futuro
+O diagnóstico continua usando os mesmos componentes e o mesmo contrato HTTP; a mudança é apenas de entrada/roteamento do build.
 
-```text
-/         → experiência definida pelo novo layout/plataforma
-/captura  → Diagnóstico Escala IMOB atual
-```
-
-> **Não executar essa mudança de rota agora.**
->
-> Ela deve acontecer somente quando existir a nova experiência para `/` e houver validação de deploy, links, analytics e SEO.
-
-O componente/fluxo atual deve ser preservado de forma que possa ser movido para `/captura` com o mínimo de retrabalho.
+No painel autenticado, **Integrações** permanece implementado no código e no backend, mas fica oculto da interface comum até existir uma integração real de produto. **Suporte técnico** também fica oculto do menu nesta versão.
 
 ---
 
@@ -193,7 +185,7 @@ As rotas abaixo são **nomes conceituais**, não decisão final de URL do router
 ├── support
 └── account
 
-/captura   (futuro; diagnóstico atual)
+/captura   (diagnóstico atual)
 ```
 
 A rota pública do site imobiliário de cada tenant poderá ter arquitetura separada da aplicação administrativa e ainda depende de decisões de domínio/hosting.
@@ -514,7 +506,7 @@ DiagnosticFlowLayout
 SuccessStep
 ```
 
-Quando chegar a hora da migração para `/captura`, a mudança ideal será de roteamento/composição, não uma reescrita do diagnóstico.
+A migração para `/captura/` foi feita por roteamento/composição, sem reescrever o diagnóstico.
 
 ### Contrato atual
 
@@ -534,7 +526,7 @@ Esse contrato permanece válido até decisão explícita de migração.
 4. Não publicar campos internos escondendo-os apenas com CSS/React.
 5. Não calcular saldo, conversão ou métrica gerencial como verdade local quando o backend possui a fonte.
 6. Não criar endpoints ad hoc no frontend para cada tela sem alinhar com o catálogo do backend.
-7. Não mover o diagnóstico para `/captura` antes de a nova raiz estar pronta.
+7. Não quebrar a compatibilidade de `/login/` nem o fluxo preservado em `/captura/`.
 8. Não assumir que as capturas do PDF são o design final.
 
 ---
@@ -558,20 +550,19 @@ Evitar construir telas finais dependentes de contratos ainda não definidos.
 
 ---
 
-## 22. Critério para mover `/` para a plataforma
+## 22. Estado da entrada pública
 
-A troca só deve ocorrer quando:
+A troca de entrada foi executada: a raiz usa o login existente e o diagnóstico foi preservado em `/captura/`.
 
-- nova experiência da raiz estiver pronta;
-- `/captura` estiver roteada e testada;
-- formulário continuar enviando ao backend;
-- links de Termos e Privacidade funcionarem;
-- WhatsApp da tela de sucesso continuar funcionando;
-- deploy do GitHub Pages estiver configurado para SPA/rotas necessárias;
-- analytics/SEO forem revisados, se aplicável;
-- regressão mobile for executada.
+Antes de cada publicação, validar:
 
-Até lá, manter o comportamento atual.
+- `/` abre o login;
+- `/login/` continua abrindo o mesmo login por compatibilidade;
+- `/captura/` abre o diagnóstico preservado;
+- o formulário do diagnóstico continua enviando normalmente;
+- links de Termos e Privacidade continuam funcionando;
+- WhatsApp da tela de sucesso continua funcionando;
+- regressão mobile das três entradas principais é executada.
 
 ---
 
