@@ -3,7 +3,11 @@ import brandLogo from "../assets/brand/escala-imob-original.svg";
 import { clearAuthSession, ensureValidAuthSession } from "../auth/session";
 import { AppApiError, getAppBootstrap, type AccessScope, type AppBootstrapResult } from "../services/appApi";
 import { applyPanelTheme, readPanelTheme } from "./panelTheme";
-import { listAgenda, type AgendaItem } from "../services/productivityApi";
+import { listAgenda, listTasks, type AgendaItem } from "../services/productivityApi";
+import { getOpportunityBoard, type OpportunityBoardResult } from "../services/crmApi";
+import { listProperties, type PropertyListResult } from "../services/propertiesApi";
+import { listFinancialTransactions, type FinancialTransactionListResult } from "../services/financeApi";
+import { listVisits, type VisitListResult } from "../services/visitsApi";
 import { listOrganizationMembers, type OrganizationMember } from "../services/organizationSettingsApi";
 import {
   BellIcon,
@@ -21,7 +25,6 @@ import {
   LogoutIcon,
   MenuIcon,
   PinIcon,
-  SearchIcon,
   SettingsIcon,
   ShareIcon,
   TargetIcon,
@@ -108,13 +111,6 @@ const navigation: NavGroup[] = [
   { label: "Sistema", items: [
     { label: "Configurações", path: "/app/configuracoes/", icon: SettingsIcon, permission: "organization.read" },
   ] },
-];
-
-const metricCards = [
-  { label: "Negócios no funil", icon: FunnelIcon },
-  { label: "Tarefas pendentes", icon: TasksIcon },
-  { label: "Imóveis ativos", icon: BuildingIcon },
-  { label: "Saldo caixa", icon: WalletIcon },
 ];
 
 function normalizedPath(): string {
@@ -212,6 +208,13 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
   const [weekItems, setWeekItems] = useState<AgendaItem[]>([]);
   const [weekLoading, setWeekLoading] = useState(true);
   const [weekError, setWeekError] = useState<string | null>(null);
+  const [boards, setBoards] = useState<OpportunityBoardResult[]>([]);
+  const [pendingTasks, setPendingTasks] = useState<number | null>(null);
+  const [properties, setProperties] = useState<PropertyListResult | null>(null);
+  const [finance, setFinance] = useState<FinancialTransactionListResult | null>(null);
+  const [visits, setVisits] = useState<VisitListResult | null>(null);
+  const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
   const weekDays = useMemo(() => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -230,6 +233,41 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
     return () => { active = false; };
   }, [activeOrganization, weekDays]);
 
+  useEffect(() => {
+    if (!activeOrganization) return;
+    let active = true;
+    setDashboardLoading(true);
+    setDashboardError(null);
+    const organizationId = activeOrganization.id;
+    void Promise.allSettled([
+      getOpportunityBoard(organizationId, { funnel: "buyers", view: "all" }),
+      getOpportunityBoard(organizationId, { funnel: "capture", view: "all" }),
+      listTasks(organizationId, { pageSize: 100 }),
+      listProperties(organizationId, { pageSize: 100 }),
+      listFinancialTransactions(organizationId, { pageSize: 1 }),
+      listVisits(organizationId, { from: new Date(), pageSize: 20 }),
+    ]).then((results) => {
+      if (!active) return;
+      const [buyersResult, captureResult, tasksResult, propertiesResult, financeResult, visitsResult] = results;
+      const loadedBoards: OpportunityBoardResult[] = [];
+      if (buyersResult.status === "fulfilled") loadedBoards.push(buyersResult.value);
+      if (captureResult.status === "fulfilled") loadedBoards.push(captureResult.value);
+      setBoards(loadedBoards);
+      if (tasksResult.status === "fulfilled") setPendingTasks(tasksResult.value.items.filter((task) => task.status !== "completed" && task.status !== "canceled").length);
+      if (propertiesResult.status === "fulfilled") setProperties(propertiesResult.value);
+      if (financeResult.status === "fulfilled") setFinance(financeResult.value);
+      if (visitsResult.status === "fulfilled") setVisits(visitsResult.value);
+      if (results.some((result) => result.status === "rejected")) setDashboardError("Alguns indicadores não puderam ser atualizados.");
+    }).finally(() => { if (active) setDashboardLoading(false); });
+    return () => { active = false; };
+  }, [activeOrganization]);
+
+  const funnelTotal = boards.reduce((total, board) => total + board.summary.active, 0);
+  const funnelValue = boards.reduce((total, board) => total + Number(board.summary.estimatedOpenValue || 0), 0);
+  const pipelineStages = boards.flatMap((board) => board.funnel.stages.map((stage) => ({ ...stage, funnelName: board.funnel.name })));
+  const upcomingVisits = (visits?.items ?? []).filter((visit) => visit.status === "scheduled" || visit.status === "confirmed").sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime()).slice(0, 5);
+  const money = (value: number | string) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: finance?.currency ?? "BRL", maximumFractionDigits: 0 }).format(Number(value) || 0);
+
   function urgency(item: AgendaItem) {
     const distance = new Date(item.startsAt).getTime() - Date.now();
     if (distance < 0 && item.status !== "completed" && item.status !== "canceled") return "overdue";
@@ -241,13 +279,17 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
     <>
       <section className="app-page-intro"><h1>Olá, {bootstrap.user.firstName || bootstrap.user.displayName}!</h1><p>{dateLabel}</p></section>
       <section className="app-metrics" aria-label="Indicadores principais">
-        {metricCards.map(({ label, icon: Icon }) => <article className="app-metric-card" key={label}><div className="app-metric-card__header"><span>{label}</span><Icon /></div><strong aria-label={`${label}: sem dados disponíveis ainda`}>—</strong><p>Será preenchido com dados reais do módulo.</p></article>)}
+        <article className="app-metric-card"><div className="app-metric-card__header"><span>Negócios no funil</span><FunnelIcon /></div><strong>{dashboardLoading ? "…" : funnelTotal}</strong><p>{money(funnelValue)} em oportunidades abertas</p></article>
+        <article className="app-metric-card"><div className="app-metric-card__header"><span>Tarefas pendentes</span><TasksIcon /></div><strong>{dashboardLoading ? "…" : pendingTasks ?? "—"}</strong><p>Próximos passos ainda não concluídos</p></article>
+        <article className="app-metric-card"><div className="app-metric-card__header"><span>Imóveis ativos</span><BuildingIcon /></div><strong>{dashboardLoading ? "…" : properties?.active ?? "—"}</strong><p>{properties?.published ?? 0} publicados · {properties?.pending ?? 0} pendentes</p></article>
+        <article className="app-metric-card"><div className="app-metric-card__header"><span>Saldo caixa</span><WalletIcon /></div><strong>{dashboardLoading ? "…" : finance ? money(finance.summary.balance) : "—"}</strong><p>{finance ? `${money(finance.summary.inflows)} entradas · ${money(finance.summary.outflows)} saídas` : "Financeiro indisponível"}</p></article>
       </section>
+      {dashboardError && <div className="app-inline-error">{dashboardError}</div>}
       <section className="app-dashboard-grid">
-        <article className="app-dashboard-panel app-dashboard-panel--wide"><header><div><FunnelIcon /><strong>Pipeline comercial</strong></div></header><div className="app-dashboard-panel__empty"><FunnelIcon /><h2>Sua operação comercial aparecerá aqui</h2><p>Os indicadores consolidados dos dois funis serão conectados aqui à medida que o dashboard operacional for ativado.</p></div></article>
-        <article className="app-dashboard-panel"><header><div><BuildingIcon /><strong>Portfólio ativo</strong></div></header><div className="app-dashboard-panel__empty"><BuildingIcon /><h2>Portfólio ainda sem indicadores</h2><p>Imóveis cadastrados alimentarão este painel automaticamente.</p></div></article>
+        <article className="app-dashboard-panel app-dashboard-panel--wide"><header><div><FunnelIcon /><strong>Pipeline comercial</strong></div><a href="/app/funis/compradores/">Abrir funis</a></header>{pipelineStages.length === 0 ? <div className="app-dashboard-panel__empty"><FunnelIcon /><h2>Nenhuma oportunidade ativa</h2><p>Crie oportunidades nos funis de compradores e captação.</p></div> : <div className="app-dashboard-pipeline">{pipelineStages.map((stage) => <article key={`${stage.funnelName}-${stage.id}`}><span style={{ background: stage.color }} /><div><strong>{stage.name}</strong><small>{stage.funnelName}</small></div><b>{stage.opportunities.length}</b></article>)}</div>}</article>
+        <article className="app-dashboard-panel"><header><div><BuildingIcon /><strong>Portfólio ativo</strong></div><a href="/app/imoveis/">Ver imóveis</a></header>{properties ? <div className="app-dashboard-portfolio"><strong>{properties.total}</strong><span>imóveis cadastrados</span><dl><div><dt>Ativos</dt><dd>{properties.active}</dd></div><div><dt>Publicados</dt><dd>{properties.published}</dd></div><div><dt>Rascunhos</dt><dd>{properties.drafts}</dd></div><div><dt>Indisponíveis</dt><dd>{properties.unavailable}</dd></div></dl></div> : <div className="app-dashboard-panel__empty"><BuildingIcon /><p>Não foi possível carregar o portfólio.</p></div>}</article>
         <article className="app-dashboard-panel app-dashboard-panel--wide app-week-panel"><header><div><CalendarIcon /><strong>Calendário da semana</strong></div><a href="/app/agenda/">Abrir agenda</a></header>{weekLoading ? <div className="app-list-loading">Carregando semana...</div> : weekError ? <div className="app-inline-error">{weekError}</div> : <div className="app-week-calendar">{weekDays.map((day) => { const items = weekItems.filter((item) => new Date(item.startsAt).toDateString() === day.toDateString()); return <section key={day.toISOString()} className={day.toDateString() === new Date().toDateString() ? "is-today" : ""}><header><strong>{new Intl.DateTimeFormat("pt-BR", { weekday: "short" }).format(day)}</strong><span>{day.getDate()}</span></header><div>{items.map((item) => <article key={`${item.source}-${item.id}`} className={`is-${urgency(item)}`} title={item.description ?? item.title}><time>{new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(item.startsAt))}</time><strong>{item.title}</strong></article>)}{items.length === 0 && <small>Livre</small>}</div></section>; })}</div>}</article>
-        <article className="app-dashboard-panel"><header><div><PinIcon /><strong>Próximas visitas</strong></div></header><div className="app-dashboard-panel__empty app-dashboard-panel__empty--compact"><PinIcon /><p>As próximas visitas aparecerão aqui.</p></div></article>
+        <article className="app-dashboard-panel"><header><div><PinIcon /><strong>Próximas visitas</strong></div><a href="/app/visitas/">Ver visitas</a></header>{upcomingVisits.length === 0 ? <div className="app-dashboard-panel__empty app-dashboard-panel__empty--compact"><PinIcon /><p>Nenhuma visita futura agendada.</p></div> : <div className="app-dashboard-visits">{upcomingVisits.map((visit) => <article key={visit.id}><time>{new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(visit.startsAt))}</time><strong>{visit.title}</strong><span>{visit.contact.name}{visit.property ? ` · ${visit.property.title}` : ""}</span></article>)}</div>}</article>
       </section>
     </>
   );
@@ -418,7 +460,6 @@ export function App() {
           <img className="app-sidebar__brand app-sidebar__brand--compact" src="/assets/registration/logo_simples_escala_imob.png" alt="" aria-hidden="true" />
           <button className="app-sidebar__collapse" type="button" onClick={handleCollapseToggle} aria-label={collapsed ? "Expandir menu" : "Recolher menu"} title={collapsed ? "Expandir menu" : "Recolher menu"}><CollapseIcon /></button>
         </div>
-        <div className="app-sidebar__search" title="A busca global será ativada junto aos módulos de negócio"><SearchIcon /><input aria-label="Pesquisar" placeholder="Pesquisar" disabled /></div>
         <div className={`app-organization-switcher${organizationMembersOpen ? " is-open" : ""}`}><div className="app-organization-card">
           <div className="app-organization-card__logo" aria-hidden={!activeOrganization?.logoUrl}>{activeOrganization?.logoUrl ? <img src={activeOrganization.logoUrl} alt="" /> : <span>{initials(activeOrganization?.name ?? "Escala IMOB")}</span>}</div>
           <div className="app-organization-card__text"><strong>{activeOrganization?.name ?? "Sem organização ativa"}</strong><span>{activeOrganization ? `${activeOrganization.memberCount} ${activeOrganization.memberCount === 1 ? "membro" : "membros"}` : "Selecione uma organização"}</span></div>
