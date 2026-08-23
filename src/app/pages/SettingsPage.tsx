@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AppApiError } from "../../services/appApi";
+import { ensureValidAuthSession } from "../../auth/session";
+import { confirmOnboardingAvatar, createOnboardingAvatarUpload, uploadOnboardingAvatar } from "../../services/registrationApi";
 import {
   addOrganizationRoleMember,
   addOrganizationTeamMember,
@@ -94,6 +96,7 @@ import { applyPanelTheme, defaultPanelTheme, readPanelTheme, resetPanelTheme, sa
 interface Props {
   organizationId: string;
   currentMembershipId: string;
+  currentUser: { displayName: string; avatarUrl: string | null };
   canUpdate: boolean;
   canReadUsers: boolean;
   canUpdateUsers: boolean;
@@ -533,6 +536,7 @@ function IntegrationSettingsRow({ item, canUpdate, busy, onSave, onTest, onRevok
 export function SettingsPage({
   organizationId,
   currentMembershipId,
+  currentUser,
   canUpdate,
   canReadUsers,
   canUpdateUsers,
@@ -611,6 +615,8 @@ export function SettingsPage({
   const [members, setMembers] = useState<OrganizationMember[]>([]);
   const [teams, setTeams] = useState<OrganizationTeam[]>([]);
   const [peopleLoading, setPeopleLoading] = useState(false);
+  const [profilePhotoPreview, setProfilePhotoPreview] = useState<string | null>(null);
+  const [profilePhotoSaving, setProfilePhotoSaving] = useState(false);
   const [memberUpdatingId, setMemberUpdatingId] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [invitingMember, setInvitingMember] = useState(false);
@@ -1219,6 +1225,13 @@ export function SettingsPage({
     }
   }
 
+  async function changeProfilePhoto(file: File | null) {
+    if (!file) return;
+    const preview=URL.createObjectURL(file); setProfilePhotoPreview(preview); setProfilePhotoSaving(true); setError(null);
+    try { const session=await ensureValidAuthSession(); if(!session) throw new AppApiError("Sua sessão expirou. Entre novamente.","UNAUTHORIZED",401); const upload=await createOnboardingAvatarUpload(file,session.accessToken); await uploadOnboardingAvatar(upload,file); await confirmOnboardingAvatar(upload.storageKey,session.accessToken); await onUpdated(); }
+    catch(photoError){setProfilePhotoPreview(null);setError(photoError instanceof Error?photoError.message:"Não foi possível alterar a foto de perfil.")}
+    finally{setProfilePhotoSaving(false);URL.revokeObjectURL(preview)}
+  }
   async function removeMember(member: OrganizationMember) {
     if (!canUpdateUsers || member.membershipId === currentMembershipId || memberUpdatingId) return;
     if (!globalThis.confirm(`Excluir ${member.displayName} da organização? O acesso será arquivado e os vínculos históricos preservados.`)) return;
@@ -1926,6 +1939,7 @@ export function SettingsPage({
         {section === "people" && <>
           {canReadUsers && <section className="app-data-card app-settings-card app-settings-members-card">
             <header><div><UsersIcon/><span><strong>Usuários da organização</strong><small>Convide pessoas, controle status e recupere acessos.</small></span></div><em>{members.length} {members.length === 1 ? "membro" : "membros"}</em></header>
+            <div className="app-profile-photo-editor"><span className="app-profile-photo-editor__preview">{profilePhotoPreview||currentUser.avatarUrl?<img src={profilePhotoPreview??currentUser.avatarUrl??""} alt="Foto de perfil"/>:initials(currentUser.displayName)}</span><div className="app-profile-photo-editor__body"><strong>Foto de perfil</strong><small>JPEG, PNG ou WebP de até 10 MB. A alteração aparece imediatamente em todo o painel.</small><label className="app-secondary-button"><input type="file" accept="image/jpeg,image/png,image/webp" disabled={profilePhotoSaving} onChange={(event)=>void changeProfilePhoto(event.target.files?.[0]??null)}/>{profilePhotoSaving?"Salvando...":"Alterar foto"}</label></div></div>
             {canInviteUsers && <form className="app-settings-member-invite" onSubmit={(event) => { event.preventDefault(); void inviteMember(); }}>
               <label><span>Convidar por e-mail</span><input type="email" value={inviteEmail} maxLength={320} disabled={invitingMember || Boolean(memberAccessBusyId)} onChange={(event) => setInviteEmail(event.target.value)} placeholder="nome@imobiliaria.com.br"/></label>
               <button className="app-primary-button" type="submit" disabled={invitingMember || Boolean(memberAccessBusyId) || !inviteEmail.trim()}>{invitingMember ? "Enviando..." : "Enviar convite"}</button>
@@ -1937,7 +1951,7 @@ export function SettingsPage({
                 const accessBusy = memberAccessBusyId === member.membershipId;
                 const canResetAccess = canUpdateUsers && member.membershipStatus === "active" && member.userStatus === "active";
                 return <article key={member.membershipId} className="app-settings-member-row">
-                  <div className="app-settings-member-avatar" aria-hidden="true">{initials(member.displayName)}</div>
+                  <div className="app-settings-member-avatar" aria-hidden="true">{isCurrent&&(profilePhotoPreview||currentUser.avatarUrl)?<img src={profilePhotoPreview??currentUser.avatarUrl??""} alt=""/>:initials(member.displayName)}</div>
                   <div className="app-settings-member-identification"><strong>{member.displayName}{isCurrent && <em>Você</em>}</strong><span>{member.email}</span></div>
                   <span className={`app-settings-member-status is-${member.membershipStatus}`}>{membershipStatusLabel(member.membershipStatus)}</span>
                   <div className="app-settings-member-controls">
