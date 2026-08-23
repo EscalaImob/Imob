@@ -600,7 +600,7 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
     "all" | "buyers" | "capture"
   >("all");
   const [pipelineEvolutionRange, setPipelineEvolutionRange] = useState<
-    "month" | "30days" | "90days"
+    "7days" | "15days" | "month" | "30days" | "90days"
   >("month");
   const [hoveredEvolutionPoint, setHoveredEvolutionPoint] = useState<
     number | null
@@ -804,10 +804,15 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
   const evolutionStart = (() => {
     if (pipelineEvolutionRange === "month")
       return new Date(evolutionNow.getFullYear(), evolutionNow.getMonth(), 1);
-    return new Date(
-      evolutionNow.getTime() -
-        (pipelineEvolutionRange === "90days" ? 89 : 29) * 86_400_000,
-    );
+    const rangeDays =
+      pipelineEvolutionRange === "7days"
+        ? 7
+        : pipelineEvolutionRange === "15days"
+          ? 15
+          : pipelineEvolutionRange === "90days"
+            ? 90
+            : 30;
+    return new Date(evolutionNow.getTime() - (rangeDays - 1) * 86_400_000);
   })();
   const evolutionSpan = Math.max(
     1,
@@ -1046,7 +1051,9 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
                           className="app-pipeline-bar"
                           key={stage.chartKey}
                           title={`${stage.names.join(" + ")}: ${stage.value}`}
+                          aria-label={`${stage.names.join(" e ")}: ${stage.value} negócios`}
                         >
+                          <b>{stage.value}</b>
                           <span
                             style={{
                               height: `${Math.max(2, (stage.value / pipelineMaximum) * 100)}%`,
@@ -1068,11 +1075,18 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
                       value={pipelineEvolutionRange}
                       onChange={(event) =>
                         setPipelineEvolutionRange(
-                          event.target.value as "month" | "30days" | "90days",
+                          event.target.value as
+                            | "7days"
+                            | "15days"
+                            | "month"
+                            | "30days"
+                            | "90days",
                         )
                       }
                       aria-label="Período da evolução do pipeline"
                     >
+                      <option value="7days">Últimos 7 dias</option>
+                      <option value="15days">Últimos 15 dias</option>
                       <option value="month">Este mês</option>
                       <option value="30days">Últimos 30 dias</option>
                       <option value="90days">Últimos 90 dias</option>
