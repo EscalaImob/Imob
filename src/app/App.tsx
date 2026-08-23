@@ -717,6 +717,20 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
         `${pipelineStages.length === 1 ? 50 : (index * 100) / (pipelineStages.length - 1)},${94 - (stage.opportunities.length / pipelineMaximum) * 82}`,
     )
     .join(" ");
+  const pipelineOpportunities = pipelineStages.flatMap((stage) => stage.opportunities);
+  const pipelineWon = boards.reduce((total, board) => total + board.summary.won, 0);
+  const pipelineLost = boards.reduce((total, board) => total + board.summary.lost, 0);
+  const pipelineClosed = pipelineWon + pipelineLost;
+  const pipelineConversion = pipelineClosed ? Math.round((pipelineWon / pipelineClosed) * 100) : 0;
+  const pipelineContacts = new Set(pipelineOpportunities.map((item) => item.contact.id)).size;
+  const pipelineNegotiating = pipelineStages.filter((stage) => /negocia|proposta/iu.test(stage.name)).reduce((total, stage) => total + stage.opportunities.length, 0);
+  const pipelineAverageDays = pipelineOpportunities.length ? Math.max(1, Math.round(pipelineOpportunities.reduce((total, item) => total + Math.max(0, Date.now() - new Date(item.createdAt).getTime()), 0) / pipelineOpportunities.length / 86_400_000)) : 0;
+  const pipelineEvolution = Array.from({ length: 7 }, (_, index) => {
+    const limit = Date.now() - (30 - index * 5) * 86_400_000;
+    return pipelineOpportunities.filter((item) => new Date(item.createdAt).getTime() <= limit).length;
+  });
+  const pipelineEvolutionMaximum = Math.max(1, ...pipelineEvolution);
+  const pipelineEvolutionPoints = pipelineEvolution.map((value, index) => `${(index * 100) / 6},${92 - (value / pipelineEvolutionMaximum) * 76}`).join(" ");
   const upcomingVisits = (visits?.items ?? [])
     .filter(
       (visit) => visit.status === "scheduled" || visit.status === "confirmed",
@@ -848,6 +862,7 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
                     <strong>{funnelTotal}</strong>
                     <small>negócios</small>
                   </div>
+                  <div className="app-pipeline-legend">{pipelineStages.slice(0,10).map((stage)=><span key={stage.id}><i style={{background:stage.color}}/><b>{stage.name}</b><small>{funnelTotal?Math.round(stage.opportunities.length/funnelTotal*100):0}%</small></span>)}</div>
                 </article>
                 <article>
                   <h3>Volume por etapa</h3>
@@ -873,10 +888,17 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
                     role="img"
                     aria-label="Linha de volume das etapas"
                   >
-                    <polyline points={pipelinePoints} />
+                    <defs><linearGradient id="pipelineArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--app-blue)" stopOpacity=".28"/><stop offset="1" stopColor="var(--app-blue)" stopOpacity="0"/></linearGradient></defs><polygon points={`0,100 ${pipelineEvolutionPoints} 100,100`} fill="url(#pipelineArea)"/><polyline points={pipelineEvolutionPoints} />
                   </svg>
                 </article>
               </div>
+              <section className="app-pipeline-kpis" aria-label="Indicadores do pipeline">
+                <article><span>Total de negócios</span><strong>{funnelTotal}</strong><small>Pipeline ativo</small><svg viewBox="0 0 100 24" preserveAspectRatio="none"><polyline points="0,20 12,15 24,18 36,8 48,12 60,5 72,9 84,4 100,7"/></svg></article>
+                <article><span>Negócios ganhos</span><strong>{pipelineWon}</strong><small>{pipelineClosed ? `${pipelineConversion}% dos encerrados` : "Sem encerramentos"}</small><svg viewBox="0 0 100 24" preserveAspectRatio="none"><polyline points="0,19 14,17 27,20 40,9 53,13 66,6 80,10 100,5"/></svg></article>
+                <article><span>Taxa de conversão</span><strong>{pipelineConversion}%</strong><small>{pipelineWon} ganhos · {pipelineLost} perdidos</small><svg viewBox="0 0 100 24" preserveAspectRatio="none"><polyline points="0,18 16,12 31,16 47,8 63,14 80,6 100,10"/></svg></article>
+                <article><span>Tempo médio no pipeline</span><strong>{pipelineAverageDays}<em> dias</em></strong><small>Média das oportunidades ativas</small><svg viewBox="0 0 100 24" preserveAspectRatio="none"><polyline points="0,20 14,18 28,12 42,15 57,8 72,11 86,4 100,7"/></svg></article>
+              </section>
+              <section className="app-pipeline-summary"><strong>Resumo do funil</strong><div><span><b>{funnelTotal}</b> negócios ativos</span><span><b>{pipelineWon}</b> negócios ganhos</span><span><b>{pipelineNegotiating}</b> em negociação</span><span><b>{pipelineContacts}</b> contatos únicos</span><span><b>{money(funnelValue)}</b> valor do pipeline</span></div></section>
             </div>
           )}
         </article>
