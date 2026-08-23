@@ -587,6 +587,24 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
   const [visits, setVisits] = useState<VisitListResult | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const [hiddenPipelineStages, setHiddenPipelineStages] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [activePipelineStage, setActivePipelineStage] = useState<string | null>(
+    null,
+  );
+  const [hoveredPipelineStage, setHoveredPipelineStage] = useState<string | null>(
+    null,
+  );
+  const [pipelineVolumeFunnel, setPipelineVolumeFunnel] = useState<
+    "all" | "buyers" | "capture"
+  >("all");
+  const [pipelineEvolutionRange, setPipelineEvolutionRange] = useState<
+    "month" | "30days" | "90days"
+  >("month");
+  const [hoveredEvolutionPoint, setHoveredEvolutionPoint] = useState<
+    number | null
+  >(null);
   const weekDays = useMemo(() => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -690,33 +708,48 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
     board.funnel.stages.map((stage) => ({
       ...stage,
       funnelName: board.funnel.name,
+      funnelCode: board.funnel.code,
+      chartKey: `${board.funnel.id}:${stage.id}`,
     })),
+  );
+  const pipelineVolumeStages = pipelineStages.filter(
+    (stage) =>
+      pipelineVolumeFunnel === "all" ||
+      stage.funnelCode === pipelineVolumeFunnel,
   );
   const pipelineMaximum = Math.max(
     1,
-    ...pipelineStages.map((stage) => stage.opportunities.length),
+    ...pipelineVolumeStages.map((stage) => stage.opportunities.length),
   );
-  const pipelinePie = pipelineStages
-    .reduce<{ cursor: number; parts: string[] }>(
-      (chart, stage) => {
-        const size = funnelTotal
-          ? (stage.opportunities.length / funnelTotal) * 100
-          : 0;
-        chart.parts.push(
-          `${stage.color} ${chart.cursor}% ${chart.cursor + size}%`,
-        );
-        chart.cursor += size;
-        return chart;
-      },
-      { cursor: 0, parts: [] },
-    )
-    .parts.join(", ");
-  const pipelinePoints = pipelineStages
-    .map(
-      (stage, index) =>
-        `${pipelineStages.length === 1 ? 50 : (index * 100) / (pipelineStages.length - 1)},${94 - (stage.opportunities.length / pipelineMaximum) * 82}`,
-    )
-    .join(" ");
+  const visiblePipelineStages = pipelineStages.filter(
+    (stage) => !hiddenPipelineStages.has(stage.chartKey),
+  );
+  const visiblePipelineTotal = visiblePipelineStages.reduce(
+    (total, stage) => total + stage.opportunities.length,
+    0,
+  );
+  const pipelineSegments = visiblePipelineStages.reduce<
+    Array<(typeof pipelineStages)[number] & { start: number; size: number }>
+  >((segments, stage) => {
+    const start = segments.reduce((total, segment) => total + segment.size, 0);
+    const size = visiblePipelineTotal
+      ? (stage.opportunities.length / visiblePipelineTotal) * 100
+      : 0;
+    segments.push({ ...stage, start, size });
+    return segments;
+  }, []);
+  const togglePipelineStage = (chartKey: string) => {
+    setHiddenPipelineStages((current) => {
+      const next = new Set(current);
+      if (next.has(chartKey)) next.delete(chartKey);
+      else next.add(chartKey);
+      return next;
+    });
+    if (activePipelineStage === chartKey) setActivePipelineStage(null);
+    if (hoveredPipelineStage === chartKey) setHoveredPipelineStage(null);
+  };
+  const highlightedPipelineStage =
+    hoveredPipelineStage ?? activePipelineStage;
   const pipelineOpportunities = pipelineStages.flatMap((stage) => stage.opportunities);
   const pipelineWon = boards.reduce((total, board) => total + board.summary.won, 0);
   const pipelineLost = boards.reduce((total, board) => total + board.summary.lost, 0);
@@ -725,12 +758,40 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
   const pipelineContacts = new Set(pipelineOpportunities.map((item) => item.contact.id)).size;
   const pipelineNegotiating = pipelineStages.filter((stage) => /negocia|proposta/iu.test(stage.name)).reduce((total, stage) => total + stage.opportunities.length, 0);
   const pipelineAverageDays = pipelineOpportunities.length ? Math.max(1, Math.round(pipelineOpportunities.reduce((total, item) => total + Math.max(0, Date.now() - new Date(item.createdAt).getTime()), 0) / pipelineOpportunities.length / 86_400_000)) : 0;
+  const evolutionNow = new Date();
+  const evolutionStart = (() => {
+    if (pipelineEvolutionRange === "month")
+      return new Date(evolutionNow.getFullYear(), evolutionNow.getMonth(), 1);
+    return new Date(
+      evolutionNow.getTime() -
+        (pipelineEvolutionRange === "90days" ? 89 : 29) * 86_400_000,
+    );
+  })();
+  const evolutionSpan = Math.max(
+    1,
+    evolutionNow.getTime() - evolutionStart.getTime(),
+  );
   const pipelineEvolution = Array.from({ length: 7 }, (_, index) => {
-    const limit = Date.now() - (30 - index * 5) * 86_400_000;
-    return pipelineOpportunities.filter((item) => new Date(item.createdAt).getTime() <= limit).length;
+    const date = new Date(evolutionStart.getTime() + (evolutionSpan * index) / 6);
+    return {
+      date,
+      value: pipelineOpportunities.filter(
+        (item) => new Date(item.createdAt).getTime() <= date.getTime(),
+      ).length,
+    };
   });
-  const pipelineEvolutionMaximum = Math.max(1, ...pipelineEvolution);
-  const pipelineEvolutionPoints = pipelineEvolution.map((value, index) => `${(index * 100) / 6},${92 - (value / pipelineEvolutionMaximum) * 76}`).join(" ");
+  const pipelineEvolutionMaximum = Math.max(
+    1,
+    ...pipelineEvolution.map((point) => point.value),
+  );
+  const pipelineEvolutionCoordinates = pipelineEvolution.map((point, index) => ({
+    ...point,
+    x: 34 + (index * 276) / 6,
+    y: 126 - (point.value / pipelineEvolutionMaximum) * 98,
+  }));
+  const pipelineEvolutionPoints = pipelineEvolutionCoordinates
+    .map((point) => `${point.x},${point.y}`)
+    .join(" ");
   const upcomingVisits = (visits?.items ?? [])
     .filter(
       (visit) => visit.status === "scheduled" || visit.status === "confirmed",
@@ -833,18 +894,6 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
             </div>
           ) : (
             <div className="app-dashboard-pipeline-layout">
-              <div className="app-dashboard-pipeline">
-                {pipelineStages.map((stage) => (
-                  <article key={`${stage.funnelName}-${stage.id}`}>
-                    <span style={{ background: stage.color }} />
-                    <div>
-                      <strong>{stage.name}</strong>
-                      <small>{stage.funnelName}</small>
-                    </div>
-                    <b>{stage.opportunities.length}</b>
-                  </article>
-                ))}
-              </div>
               <div
                 className="app-dashboard-pipeline-charts"
                 aria-label="Gráficos do pipeline"
@@ -852,44 +901,216 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
                 <article>
                   <h3>Distribuição</h3>
                   <div
-                    className="app-pipeline-donut"
-                    style={{
-                      background: pipelinePie
-                        ? `conic-gradient(${pipelinePie})`
-                        : undefined,
-                    }}
+                    className={`app-pipeline-donut${highlightedPipelineStage ? " is-highlighting" : ""}`}
+                    aria-label={`Distribuição de ${visiblePipelineTotal} negócios entre as etapas selecionadas`}
                   >
-                    <strong>{funnelTotal}</strong>
-                    <small>negócios</small>
+                    <svg viewBox="0 0 120 120" aria-hidden="true">
+                      {pipelineSegments.map((segment) => (
+                        <circle
+                          key={segment.chartKey}
+                          className={`app-pipeline-donut__segment${highlightedPipelineStage === segment.chartKey ? " is-active" : ""}`}
+                          cx="60"
+                          cy="60"
+                          r="48"
+                          pathLength="100"
+                          fill="none"
+                          stroke={segment.color}
+                          strokeWidth="18"
+                          strokeDasharray={`${segment.size} ${100 - segment.size}`}
+                          strokeDashoffset={-segment.start}
+                          style={{ "--segment-color": segment.color } as React.CSSProperties}
+                        />
+                      ))}
+                    </svg>
+                    <span className="app-pipeline-donut__value">
+                      <strong>{visiblePipelineTotal}</strong>
+                      <small>negócios</small>
+                    </span>
                   </div>
-                  <div className="app-pipeline-legend">{pipelineStages.slice(0,10).map((stage)=><span key={stage.id}><i style={{background:stage.color}}/><b>{stage.name}</b><small>{funnelTotal?Math.round(stage.opportunities.length/funnelTotal*100):0}%</small></span>)}</div>
+                  <div className="app-pipeline-legend">
+                    {pipelineStages.map((stage) => {
+                      const enabled = !hiddenPipelineStages.has(stage.chartKey);
+                      const active = highlightedPipelineStage === stage.chartKey;
+                      return (
+                        <div
+                          key={stage.chartKey}
+                          className={`${active ? "is-active " : ""}${enabled ? "" : "is-disabled"}`.trim()}
+                          onMouseEnter={() => enabled && setHoveredPipelineStage(stage.chartKey)}
+                          onMouseLeave={() => setHoveredPipelineStage(null)}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={enabled}
+                            onChange={() => togglePipelineStage(stage.chartKey)}
+                            aria-label={`${enabled ? "Ocultar" : "Exibir"} ${stage.name} no gráfico`}
+                            style={{ accentColor: stage.color }}
+                          />
+                          <button
+                            type="button"
+                            disabled={!enabled}
+                            aria-pressed={active}
+                            onFocus={() => setHoveredPipelineStage(stage.chartKey)}
+                            onBlur={() => setHoveredPipelineStage(null)}
+                            onClick={() =>
+                              setActivePipelineStage((current) =>
+                                current === stage.chartKey ? null : stage.chartKey,
+                              )
+                            }
+                          >
+                            <i style={{ background: stage.color }} />
+                            <b>{stage.name}</b>
+                            <small>
+                              {enabled && visiblePipelineTotal
+                                ? Math.round(
+                                    (stage.opportunities.length /
+                                      visiblePipelineTotal) *
+                                      100,
+                                  )
+                                : 0}
+                              %
+                            </small>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </article>
                 <article>
-                  <h3>Volume por etapa</h3>
-                  <div className="app-pipeline-bars">
-                    {pipelineStages.map((stage) => (
-                      <span
-                        key={stage.id}
-                        title={`${stage.name}: ${stage.opportunities.length}`}
-                        style={{
-                          height: `${Math.max(5, (stage.opportunities.length / pipelineMaximum) * 100)}%`,
-                          background: stage.color,
-                        }}
+                  <header className="app-pipeline-chart-header">
+                    <h3>Volume por etapa</h3>
+                    <select
+                      value={pipelineVolumeFunnel}
+                      onChange={(event) =>
+                        setPipelineVolumeFunnel(
+                          event.target.value as "all" | "buyers" | "capture",
+                        )
+                      }
+                      aria-label="Filtrar volume por funil"
+                    >
+                      <option value="all">Todos os funis</option>
+                      <option value="buyers">Compradores</option>
+                      <option value="capture">Captação</option>
+                    </select>
+                  </header>
+                  <div className="app-pipeline-bar-chart">
+                    <div className="app-pipeline-chart-y" aria-hidden="true">
+                      {[1, 0.75, 0.5, 0.25, 0].map((ratio) => (
+                        <span key={ratio}>{Math.ceil(pipelineMaximum * ratio)}</span>
+                      ))}
+                    </div>
+                    <div className="app-pipeline-bars">
+                      {pipelineVolumeStages.map((stage) => (
+                        <div
+                          className="app-pipeline-bar"
+                          key={stage.chartKey}
+                          title={`${stage.name}: ${stage.opportunities.length}`}
+                        >
+                          <span
+                            style={{
+                              height: `${Math.max(2, (stage.opportunities.length / pipelineMaximum) * 100)}%`,
+                              background: stage.color,
+                              color: stage.color,
+                            }}
+                          />
+                          <small>{stage.name}</small>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <small className="app-pipeline-chart-caption">Etapas do funil</small>
+                </article>
+                <article>
+                  <header className="app-pipeline-chart-header">
+                    <h3>Evolução pelas etapas</h3>
+                    <select
+                      value={pipelineEvolutionRange}
+                      onChange={(event) =>
+                        setPipelineEvolutionRange(
+                          event.target.value as "month" | "30days" | "90days",
+                        )
+                      }
+                      aria-label="Período da evolução do pipeline"
+                    >
+                      <option value="month">Este mês</option>
+                      <option value="30days">Últimos 30 dias</option>
+                      <option value="90days">Últimos 90 dias</option>
+                    </select>
+                  </header>
+                  <div className="app-pipeline-line-chart">
+                    <svg
+                      className="app-pipeline-line"
+                      viewBox="0 0 320 150"
+                      role="img"
+                      aria-label="Evolução acumulada de negócios no período"
+                    >
+                      <defs>
+                        <linearGradient id="pipelineArea" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0" stopColor="var(--app-blue)" stopOpacity=".34" />
+                          <stop offset="1" stopColor="var(--app-blue)" stopOpacity="0" />
+                        </linearGradient>
+                      </defs>
+                      {[28, 52.5, 77, 101.5, 126].map((y, index) => (
+                        <g key={y} className="app-pipeline-line__grid">
+                          <line x1="34" y1={y} x2="310" y2={y} />
+                          <text x="27" y={y + 3} textAnchor="end">
+                            {Math.round(
+                              pipelineEvolutionMaximum * (1 - index / 4),
+                            )}
+                          </text>
+                        </g>
+                      ))}
+                      <polygon
+                        points={`34,126 ${pipelineEvolutionPoints} 310,126`}
+                        fill="url(#pipelineArea)"
                       />
-                    ))}
+                      <polyline points={pipelineEvolutionPoints} />
+                      {pipelineEvolutionCoordinates.map((point, index) => (
+                        <g key={point.date.toISOString()}>
+                          <circle
+                            className={hoveredEvolutionPoint === index ? "is-active" : ""}
+                            cx={point.x}
+                            cy={point.y}
+                            r={hoveredEvolutionPoint === index ? 4 : 2.5}
+                            tabIndex={0}
+                            onMouseEnter={() => setHoveredEvolutionPoint(index)}
+                            onMouseLeave={() => setHoveredEvolutionPoint(null)}
+                            onFocus={() => setHoveredEvolutionPoint(index)}
+                            onBlur={() => setHoveredEvolutionPoint(null)}
+                          />
+                          <text
+                            className="app-pipeline-line__date"
+                            x={point.x}
+                            y="143"
+                            textAnchor={index === 0 ? "start" : index === 6 ? "end" : "middle"}
+                          >
+                            {point.date.toLocaleDateString("pt-BR", {
+                              day: "2-digit",
+                              month: "2-digit",
+                            })}
+                          </text>
+                        </g>
+                      ))}
+                    </svg>
+                    {hoveredEvolutionPoint !== null && (
+                      <div
+                        className="app-pipeline-line-tooltip"
+                        style={{
+                          left: `${(pipelineEvolutionCoordinates[hoveredEvolutionPoint].x / 320) * 100}%`,
+                          top: `${(pipelineEvolutionCoordinates[hoveredEvolutionPoint].y / 150) * 100}%`,
+                        }}
+                      >
+                        <small>
+                          {pipelineEvolutionCoordinates[
+                            hoveredEvolutionPoint
+                          ].date.toLocaleDateString("pt-BR")}
+                        </small>
+                        <strong>
+                          {pipelineEvolutionCoordinates[hoveredEvolutionPoint].value}{" "}
+                          negócios
+                        </strong>
+                      </div>
+                    )}
                   </div>
-                </article>
-                <article>
-                  <h3>Evolução pelas etapas</h3>
-                  <svg
-                    className="app-pipeline-line"
-                    viewBox="0 0 100 100"
-                    preserveAspectRatio="none"
-                    role="img"
-                    aria-label="Linha de volume das etapas"
-                  >
-                    <defs><linearGradient id="pipelineArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--app-blue)" stopOpacity=".28"/><stop offset="1" stopColor="var(--app-blue)" stopOpacity="0"/></linearGradient></defs><polygon points={`0,100 ${pipelineEvolutionPoints} 100,100`} fill="url(#pipelineArea)"/><polyline points={pipelineEvolutionPoints} />
-                  </svg>
                 </article>
               </div>
               <section className="app-pipeline-kpis" aria-label="Indicadores do pipeline">
@@ -902,7 +1123,7 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
             </div>
           )}
         </article>
-        <article className="app-dashboard-panel">
+        <article className="app-dashboard-panel app-dashboard-portfolio-panel">
           <header>
             <div>
               <BuildingIcon />
@@ -940,7 +1161,7 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
             </div>
           )}
         </article>
-        <article className="app-dashboard-panel app-dashboard-panel--wide app-week-panel">
+        <article className="app-dashboard-panel app-week-panel">
           <header>
             <div>
               <CalendarIcon />
