@@ -1219,6 +1219,21 @@ export function SettingsPage({
     }
   }
 
+  async function removeMember(member: OrganizationMember) {
+    if (!canUpdateUsers || member.membershipId === currentMembershipId || memberUpdatingId) return;
+    if (!globalThis.confirm(`Excluir ${member.displayName} da organização? O acesso será arquivado e os vínculos históricos preservados.`)) return;
+    setMemberUpdatingId(member.membershipId); setError(null); setSuccess(null);
+    try {
+      await updateOrganizationMemberStatus(organizationId, member.membershipId, "archived");
+      setMembers((current) => current.filter((item) => item.membershipId !== member.membershipId));
+      setTeams((current) => current.map((team) => ({ ...team, members: team.members.filter((item) => item.membershipId !== member.membershipId) })));
+      setSuccess(`${member.displayName} foi removido da organização.`);
+      await onUpdated();
+    } catch (removeError) {
+      setError(removeError instanceof AppApiError ? removeError.message : "Não foi possível excluir o usuário.");
+    } finally { setMemberUpdatingId(null); }
+  }
+
   async function inviteMember(emailInput = inviteEmail) {
     const email = emailInput.trim().toLowerCase();
     if (!canInviteUsers || invitingMember || memberAccessBusyId || !email) {
@@ -1930,6 +1945,8 @@ export function SettingsPage({
                     <div className="app-settings-member-access-actions">
                       {member.membershipStatus === "invited" && canInviteUsers && <button className="app-secondary-button" type="button" disabled={accessBusy || invitingMember} onClick={() => void inviteMember(member.email)}>{accessBusy ? "Enviando..." : "Reenviar convite"}</button>}
                       {canResetAccess && <button className="app-secondary-button" type="button" disabled={accessBusy || invitingMember} onClick={() => void requestAccessReset(member)}>{accessBusy ? "Solicitando..." : "Redefinir acesso"}</button>}
+                      {isCurrent && <button className="app-secondary-button" type="button" onClick={() => setSection("company")}>Editar perfil</button>}
+                      {!isCurrent && canUpdateUsers && <button className="app-secondary-button is-danger" type="button" disabled={updating || accessBusy} onClick={() => void removeMember(member)}>{updating ? "Excluindo..." : "Excluir usuário"}</button>}
                     </div>
                   </div>
                 </article>;
