@@ -712,14 +712,56 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
       chartKey: `${board.funnel.id}:${stage.id}`,
     })),
   );
-  const pipelineVolumeStages = pipelineStages.filter(
+  const pipelineVolumeSource = pipelineStages.filter(
     (stage) =>
       pipelineVolumeFunnel === "all" ||
       stage.funnelCode === pipelineVolumeFunnel,
   );
-  const pipelineMaximum = Math.max(
+  const pipelineVolumeStages = Array.from(
+    pipelineVolumeSource
+      .reduce(
+        (stages, stage) => {
+          const key =
+            pipelineVolumeFunnel === "all"
+              ? stage.position
+              : `${stage.funnelCode}:${stage.position}`;
+          const current = stages.get(key);
+          if (current) {
+            current.value += stage.opportunities.length;
+            current.names.push(stage.name);
+          } else {
+            stages.set(key, {
+              chartKey: `volume:${String(key)}`,
+              position: stage.position,
+              name: stage.name,
+              names: [stage.name],
+              color: stage.color,
+              value: stage.opportunities.length,
+            });
+          }
+          return stages;
+        },
+        new Map<
+          string | number,
+          {
+            chartKey: string;
+            position: number;
+            name: string;
+            names: string[];
+            color: string;
+            value: number;
+          }
+        >(),
+      )
+      .values(),
+  ).sort((a, b) => a.position - b.position);
+  const pipelineVolumeDataMaximum = Math.max(
     1,
-    ...pipelineVolumeStages.map((stage) => stage.opportunities.length),
+    ...pipelineVolumeStages.map((stage) => stage.value),
+  );
+  const pipelineMaximum = Math.max(
+    4,
+    Math.ceil(pipelineVolumeDataMaximum / 4) * 4,
   );
   const visiblePipelineStages = pipelineStages.filter(
     (stage) => !hiddenPipelineStages.has(stage.chartKey),
@@ -1003,11 +1045,11 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
                         <div
                           className="app-pipeline-bar"
                           key={stage.chartKey}
-                          title={`${stage.name}: ${stage.opportunities.length}`}
+                          title={`${stage.names.join(" + ")}: ${stage.value}`}
                         >
                           <span
                             style={{
-                              height: `${Math.max(2, (stage.opportunities.length / pipelineMaximum) * 100)}%`,
+                              height: `${Math.max(2, (stage.value / pipelineMaximum) * 100)}%`,
                               background: stage.color,
                               color: stage.color,
                             }}
@@ -1040,6 +1082,7 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
                     <svg
                       className="app-pipeline-line"
                       viewBox="0 0 320 150"
+                      preserveAspectRatio="none"
                       role="img"
                       aria-label="Evolução acumulada de negócios no período"
                     >
