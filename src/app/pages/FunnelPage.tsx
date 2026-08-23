@@ -5,11 +5,14 @@ import {
 } from "../../services/appApi";
 import {
   createOpportunity,
+  getOpportunityDetail,
   getOpportunityBoard,
   listContacts,
   moveOpportunityStage,
+  updateOpportunity,
   type ContactListItem,
   type OpportunityCard,
+  type OpportunityDetail,
   type OpportunityFunnelCode,
   type OpportunityRequiredField,
   type OpportunityStage,
@@ -245,6 +248,13 @@ function TransitionModal({ state, lossReasons, saving, error, onClose, onConfirm
   );
 }
 
+function OpportunityEditModal({organizationId,card,onClose,onSaved}:{organizationId:string;card:OpportunityCard;onClose:()=>void;onSaved:(detail:OpportunityDetail)=>void}){
+  const[detail,setDetail]=useState<OpportunityDetail|null>(null);const[loading,setLoading]=useState(true);const[saving,setSaving]=useState(false);const[error,setError]=useState<string|null>(null);
+  useEffect(()=>{let active=true;void getOpportunityDetail(organizationId,card.id).then(value=>{if(active)setDetail(value)}).catch(e=>{if(active)setError(e instanceof AppApiError?e.message:"Não foi possível carregar a oportunidade.")}).finally(()=>{if(active)setLoading(false)});return()=>{active=false}},[organizationId,card.id]);
+  async function submit(event:FormEvent<HTMLFormElement>){event.preventDefault();if(!detail||saving)return;const form=new FormData(event.currentTarget);const title=String(form.get("title")??"").trim();if(!title)return;setSaving(true);setError(null);try{const probability=String(form.get("probability")??"").trim();const temperature=String(form.get("temperature")??"").trim();const updated=await updateOpportunity(organizationId,card.id,{title,description:String(form.get("description")??"").trim()||undefined,estimatedValue:String(form.get("estimatedValue")??"").trim()||undefined,probability:probability===""?undefined:Number(probability),expectedCloseDate:String(form.get("expectedCloseDate")??"")||undefined,temperature:temperature?temperature as Exclude<OpportunityCard["temperature"],null>:undefined});onSaved(updated)}catch(e){setError(e instanceof AppApiError?e.message:"Não foi possível salvar a oportunidade.")}finally{setSaving(false)}}
+  return <div className="app-modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget&&!saving)onClose()}}><section className="app-modal app-opportunity-modal" role="dialog" aria-modal="true" aria-labelledby="edit-opportunity-title"><header><div><span className="app-section-eyebrow">CRM & Vendas</span><h2 id="edit-opportunity-title">Editar oportunidade</h2></div><button type="button" onClick={onClose} disabled={saving} aria-label="Fechar">×</button></header>{loading?<div className="app-list-loading">Carregando oportunidade...</div>:detail?<form onSubmit={event=>void submit(event)}><div className="app-form-grid"><label className="is-wide"><span>Título *</span><input name="title" defaultValue={detail.title} required maxLength={220} autoFocus/></label><label><span>Valor estimado</span><input name="estimatedValue" defaultValue={detail.estimatedValue??""} inputMode="decimal"/></label><label><span>Probabilidade (%)</span><input name="probability" defaultValue={detail.probability??""} type="number" min="0" max="100"/></label><label><span>Previsão de fechamento</span><input name="expectedCloseDate" defaultValue={detail.expectedCloseDate??""} type="date"/></label><label><span>Temperatura</span><select name="temperature" defaultValue={detail.temperature??""}><option value="">Não informada</option><option value="cold">Frio</option><option value="warm">Morno</option><option value="hot">Quente</option></select></label><label className="is-wide"><span>Descrição</span><textarea name="description" defaultValue={detail.description??""} rows={5} maxLength={4000}/></label></div>{error&&<div className="app-inline-error">{error}</div>}<footer><button type="button" className="app-secondary-button" onClick={onClose} disabled={saving}>Cancelar</button><button type="submit" className="app-primary-button" disabled={saving}>{saving?"Salvando...":"Salvar oportunidade"}</button></footer></form>:<div className="app-inline-error">{error??"Oportunidade indisponível."}</div>}</section></div>
+}
+
 export function FunnelPage({ organizationId, funnelCode, canCreate, canUpdate }: Props) {
   const [board, setBoard] = useState<Awaited<ReturnType<typeof getOpportunityBoard>> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -258,6 +268,7 @@ export function FunnelPage({ organizationId, funnelCode, canCreate, canUpdate }:
   const [transition, setTransition] = useState<TransitionState>(null);
   const [transitionError, setTransitionError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
+  const [editingCard,setEditingCard]=useState<OpportunityCard|null>(null);
 
   const defaultTitle = funnelCode === "buyers" ? "Funil de compradores" : "Funil de captação";
   const title = board?.funnel.name || defaultTitle;
@@ -311,10 +322,21 @@ export function FunnelPage({ organizationId, funnelCode, canCreate, canUpdate }:
     setError(null);
     setTransitionError(null);
     try {
-      await moveOpportunityStage(organizationId, state.card.id, state.stage.id, lossReasonId || undefined);
+      const moved = await moveOpportunityStage(organizationId, state.card.id, state.stage.id, lossReasonId || undefined);
+      setBoard((current) => current ? {
+        ...current,
+        funnel: {
+          ...current.funnel,
+          stages: current.funnel.stages.map((stage) => ({
+            ...stage,
+            opportunities: stage.id === state.stage.id
+              ? [...stage.opportunities.filter((card) => card.id !== state.card.id), { ...state.card, status: moved.status, probability: stage.probability }]
+              : stage.opportunities.filter((card) => card.id !== state.card.id),
+          })),
+        },
+      } : current);
       setTransition(null);
       cancelPointerDrag();
-      await load();
     } catch (moveError) {
       const message = moveError instanceof AppApiError ? moveError.message : "Não foi possível mover a oportunidade.";
       setTransitionError(message);
@@ -368,7 +390,7 @@ export function FunnelPage({ organizationId, funnelCode, canCreate, canUpdate }:
               >
                 <header style={{ borderTopColor: stage.color }}><div><strong>{stage.name}</strong><span>{stage.probability ?? 0}%</span></div><b>{stage.opportunities.length}</b></header>
                 <div className="app-kanban-column__body">
-                  {stage.opportunities.map((card) => <OpportunityCardView key={card.id} card={card} canUpdate={canUpdate} isDragging={draggedCard?.id === card.id} onPointerDragStart={(selected, clientX, clientY) => { setDraggedCard(selected); setDragTargetStageId(stageIdAtPoint(clientX, clientY)); }} onPointerDragMove={(clientX, clientY) => setDragTargetStageId(stageIdAtPoint(clientX, clientY))} onPointerDragEnd={finishPointerDrag} onPointerDragCancel={cancelPointerDrag} onOpen={(selected) => { globalThis.location.href = `/app/oportunidade/?id=${encodeURIComponent(selected.id)}`; }} />)}
+                  {stage.opportunities.map((card) => <OpportunityCardView key={card.id} card={card} canUpdate={canUpdate} isDragging={draggedCard?.id === card.id} onPointerDragStart={(selected, clientX, clientY) => { setDraggedCard(selected); setDragTargetStageId(stageIdAtPoint(clientX, clientY)); }} onPointerDragMove={(clientX, clientY) => setDragTargetStageId(stageIdAtPoint(clientX, clientY))} onPointerDragEnd={finishPointerDrag} onPointerDragCancel={cancelPointerDrag} onOpen={(selected) => { if (canUpdate) setEditingCard(selected); }} />)}
                   {stage.opportunities.length === 0 && <div className="app-kanban-empty">Nenhuma oportunidade</div>}
                 </div>
               </section>
@@ -378,6 +400,10 @@ export function FunnelPage({ organizationId, funnelCode, canCreate, canUpdate }:
       )}
 
       {createOpen && <OpportunityModal organizationId={organizationId} funnelCode={funnelCode} onClose={() => setCreateOpen(false)} onCreated={() => { setCreateOpen(false); void load(); }} />}
+      {editingCard && <OpportunityEditModal organizationId={organizationId} card={editingCard} onClose={() => setEditingCard(null)} onSaved={(updated) => {
+        setBoard((current) => current ? ({ ...current, funnel: { ...current.funnel, stages: current.funnel.stages.map((stage) => ({ ...stage, opportunities: stage.opportunities.map((card) => card.id === updated.id ? ({ ...card, title: updated.title, estimatedValue: updated.estimatedValue, probability: updated.probability, expectedCloseDate: updated.expectedCloseDate, temperature: updated.temperature, lastActivityAt: updated.lastActivityAt }) : card) })) } }) : current);
+        setEditingCard(null);
+      }} />}
       {transition && <TransitionModal state={transition} lossReasons={board?.funnel.lossReasons ?? []} saving={moving} error={transitionError} onClose={() => { if (!moving) { setTransition(null); setTransitionError(null); cancelPointerDrag(); } }} onConfirm={(lossReasonId) => { if (transition) void executeMove(transition, lossReasonId); }} />}
     </>
   );

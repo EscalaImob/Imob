@@ -36,6 +36,7 @@ export async function getCorporateInspectionOptions(organizationId: string): Pro
 export async function getCorporateInspection(organizationId: string, id: string): Promise<CorporateInspectionDetail> { return tenantRequest(organizationId, `/corporate/inspections/${encodeURIComponent(id)}`); }
 export async function createCorporateInspection(organizationId: string, input: CorporateInspectionFields & { propertyId: string; visitId: string | null; contractId: string | null }): Promise<CorporateInspectionDetail> { return tenantRequest(organizationId, "/corporate/inspections", { method: "POST", body: JSON.stringify(input) }); }
 export async function updateCorporateInspection(organizationId: string, id: string, fields: CorporateInspectionFields): Promise<CorporateInspectionDetail> { return tenantRequest(organizationId, `/corporate/inspections/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(fields) }); }
+export async function deleteCorporateInspection(organizationId: string, id: string): Promise<{id:string;archived:boolean}> { return tenantRequest(organizationId, "/corporate/inspections/"+encodeURIComponent(id), { method: "DELETE" }); }
 
 export type CorporateInspectionEvidenceContentType = "image/jpeg" | "image/png" | "image/webp" | "video/mp4" | "video/webm" | "application/pdf";
 export type CorporateInspectionEvidenceKind = "photo" | "video" | "document";

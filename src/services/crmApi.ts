@@ -57,6 +57,8 @@ export interface CreateContactInput {
   source?: string;
   profiles: ContactProfileCode[];
 }
+export interface ContactDetail extends ContactListItem { whatsapp: string | null; }
+export interface UpdateContactInput extends CreateContactInput { status: ContactStatus; }
 
 export type LeadIntent = "buyer" | "capture";
 export type LeadStatus = "new" | "in_progress" | "converted" | "invalid" | "duplicate" | "spam" | "archived";
@@ -191,6 +193,19 @@ export async function createContact(
   });
 }
 
+export type LeadListItem = LeadListResult["items"][number];
+export interface LeadDetail extends LeadListItem { relatedContactId: string | null; archivedAt: string | null; updatedAt: string; }
+export interface UpdateLeadInput { name: string; email: string | null; phone: string | null; message: string | null; status: LeadStatus; }
+export interface CreateLeadInput { intent: LeadIntent; source: string; name: string; email: string | null; phone: string | null; message: string | null; campaign: string | null; sourcePage: string | null; propertyType: string | null; regionCity: string | null; regionState: string | null; relatedPropertyId: string | null; }
+
+export async function getContact(organizationId: string, contactId: string): Promise<ContactDetail> {
+  return tenantRequest<ContactDetail>(organizationId, `/crm/contacts/${encodeURIComponent(contactId)}`);
+}
+
+export async function updateContact(organizationId: string, contactId: string, input: UpdateContactInput): Promise<ContactDetail> {
+  return tenantRequest<ContactDetail>(organizationId, `/crm/contacts/${encodeURIComponent(contactId)}`, { method: "PATCH", body: JSON.stringify(input) });
+}
+
 export async function listLeads(
   organizationId: string,
   filters: { search?: string; intent?: string; status?: string; page?: number },
@@ -202,6 +217,21 @@ export async function listLeads(
   if (filters.page && filters.page > 1) query.set("page", String(filters.page));
   const suffix = query.size > 0 ? `?${query.toString()}` : "";
   return tenantRequest<LeadListResult>(organizationId, `/crm/leads${suffix}`);
+}
+export async function createLead(organizationId: string, input: CreateLeadInput): Promise<LeadDetail> {
+  return tenantRequest<LeadDetail>(organizationId, "/crm/leads", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function getLead(organizationId: string, leadId: string): Promise<LeadDetail> {
+  return tenantRequest<LeadDetail>(organizationId, `/crm/leads/${encodeURIComponent(leadId)}`);
+}
+
+export async function updateLead(organizationId: string, leadId: string, input: UpdateLeadInput): Promise<LeadDetail> {
+  return tenantRequest<LeadDetail>(organizationId, `/crm/leads/${encodeURIComponent(leadId)}`, { method: "PATCH", body: JSON.stringify(input) });
+}
+export interface LeadConversionResult { leadId: string; contactId: string; opportunityId: string; funnelCode: "buyers" | "capture"; reusedContact: boolean; }
+export async function convertLead(organizationId: string, leadId: string): Promise<LeadConversionResult> {
+  return tenantRequest<LeadConversionResult>(organizationId, `/crm/leads/${encodeURIComponent(leadId)}/convert`, { method: "POST" });
 }
 
 export interface LeadAssignmentResult {

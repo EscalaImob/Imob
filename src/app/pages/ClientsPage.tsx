@@ -3,7 +3,10 @@ import { clearAuthSession } from "../../auth/session";
 import { AppApiError } from "../../services/appApi";
 import {
   createContact,
+  getContact,
   listContacts,
+  updateContact,
+  type ContactDetail,
   type ContactListResult,
   type ContactProfileCode,
 } from "../../services/crmApi";
@@ -46,9 +49,10 @@ function EmptyState({ filtered }: { filtered: boolean }) {
 interface ClientsPageProps {
   organizationId: string;
   canCreate: boolean;
+  canUpdate?: boolean;
 }
 
-export function ClientsPage({ organizationId, canCreate }: ClientsPageProps) {
+export function ClientsPage({ organizationId, canCreate, canUpdate = canCreate }: ClientsPageProps) {
   const [data, setData] = useState<ContactListResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +65,7 @@ export function ClientsPage({ organizationId, canCreate }: ClientsPageProps) {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [selectedProfiles, setSelectedProfiles] = useState<ContactProfileCode[]>(["interested"]);
+  const [selectedContact, setSelectedContact] = useState<ContactDetail | null>(null);
 
   useEffect(() => {
     const timeout = globalThis.setTimeout(() => {
@@ -116,7 +121,21 @@ export function ClientsPage({ organizationId, canCreate }: ClientsPageProps) {
       : [...current, code]);
   }
 
-  async function handleCreate(event: FormEvent<HTMLFormElement>) {
+  async function openEdit(contactId: string) {
+    setFormError(null);
+    setSaving(true);
+    try {
+      const contact = await getContact(organizationId, contactId);
+      setSelectedContact(contact);
+      setSelectedProfiles(contact.profiles);
+      setModalOpen(true);
+    } catch (loadError) { setError(loadError instanceof AppApiError && loadError.status === 404 ? "A rota de detalhe do cliente ainda não está disponível na API publicada. Atualize o backend e tente novamente." : loadError instanceof Error ? loadError.message : "Não foi possível abrir o cliente."); }
+    finally { setSaving(false); }
+  }
+
+  function openCreate() { setSelectedContact(null); setSelectedProfiles(["interested"]); setFormError(null); setModalOpen(true); }
+
+  async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError(null);
     const form = new FormData(event.currentTarget);
@@ -128,8 +147,8 @@ export function ClientsPage({ organizationId, canCreate }: ClientsPageProps) {
 
     setSaving(true);
     try {
-      await createContact(organizationId, {
-        kind: form.get("kind") === "company" ? "company" : "person",
+      const input = {
+        kind: (form.get("kind") === "company" ? "company" : "person") as "company" | "person",
         name,
         document: String(form.get("document") ?? "").trim(),
         email: String(form.get("email") ?? "").trim(),
@@ -139,14 +158,46 @@ export function ClientsPage({ organizationId, canCreate }: ClientsPageProps) {
         state: String(form.get("state") ?? "").trim(),
         source: "manual",
         profiles: selectedProfiles,
-      });
+      };
+      const requestedStatus = String(form.get("status") ?? "active");
+      const contactStatus = requestedStatus === "inactive" || requestedStatus === "blocked" || requestedStatus === "archived" ? requestedStatus : "active";
+      const saved = selectedContact
+        ? await updateContact(organizationId, selectedContact.id, { ...input, status: contactStatus })
+        : await createContact(organizationId, input);
       setModalOpen(false);
+      setSelectedContact(null);
       setSelectedProfiles(["interested"]);
-      setPage(1);
-      const refreshed = await listContacts(organizationId, { search: debouncedSearch, profile, status, page: 1 });
-      setData(refreshed);
+      if (selectedContact) setData((current) => current ? { ...current, items: current.items.map((item) => item.id === saved.id ? { ...item, ...saved } : item) } : current);
+      else { setPage(1); const refreshed = await listContacts(organizationId, { search: debouncedSearch, profile, status, page: 1 }); setData(refreshed); }
     } catch (saveError) {
       setFormError(saveError instanceof Error ? saveError.message : "Não foi possível cadastrar o cliente.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeContact(contactId: string, contactName: string) {
+    if (!globalThis.confirm(`Excluir o cliente "${contactName}"? O cadastro será arquivado e o histórico será preservado.`)) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const contact = await getContact(organizationId, contactId);
+      await updateContact(organizationId, contactId, {
+        kind: contact.kind,
+        name: contact.name,
+        document: contact.document ?? "",
+        email: contact.email ?? "",
+        phone: contact.phone ?? "",
+        whatsapp: contact.whatsapp ?? "",
+        city: contact.city ?? "",
+        state: contact.state ?? "",
+        source: contact.source,
+        profiles: contact.profiles,
+        status: "archived",
+      });
+      setData((current) => current ? { ...current, items: current.items.filter((item) => item.id !== contactId), totalItems: Math.max(0, current.totalItems - 1) } : current);
+    } catch (removeError) {
+      setError(removeError instanceof AppApiError ? removeError.message : "Não foi possível excluir o cliente.");
     } finally {
       setSaving(false);
     }
@@ -160,7 +211,7 @@ export function ClientsPage({ organizationId, canCreate }: ClientsPageProps) {
           <h1>Gerenciar clientes</h1>
           <p>Uma base única para interessados, compradores, proprietários e demais relacionamentos.</p>
         </div>
-        {canCreate && <div className="app-heading-actions"><a className="app-secondary-button" href="/app/configuracoes/?section=transfers&resource=contacts">Importar planilha</a><button className="app-primary-button" type="button" onClick={() => setModalOpen(true)}>+ Novo cliente</button></div>}
+        {canCreate && <div className="app-heading-actions"><a className="app-secondary-button" href="/app/configuracoes/?section=transfers&resource=contacts">Importar planilha</a><button className="app-primary-button" type="button" onClick={openCreate}>+ Novo cliente</button></div>}
       </section>
 
       <section className="app-summary-cards" aria-label="Resumo de clientes">
@@ -181,7 +232,7 @@ export function ClientsPage({ organizationId, canCreate }: ClientsPageProps) {
           <>
             <div className="app-table-wrap">
               <table className="app-data-table">
-                <thead><tr><th>Cliente</th><th>Contato</th><th>Classificação</th><th>Localização</th><th>Cadastro</th><th>Status</th></tr></thead>
+                <thead><tr><th>Cliente</th><th>Contato</th><th>Classificação</th><th>Localização</th><th>Cadastro</th><th>Status</th>{canUpdate && <th>Ações</th>}</tr></thead>
                 <tbody>{data.items.map((item) => (
                   <tr key={item.id}>
                     <td><strong>{item.name}</strong><small>{item.document || (item.kind === "company" ? "Pessoa jurídica" : "Pessoa física")}</small></td>
@@ -190,6 +241,7 @@ export function ClientsPage({ organizationId, canCreate }: ClientsPageProps) {
                     <td><span>{[item.city, item.state].filter(Boolean).join(" / ") || "—"}</span></td>
                     <td><span>{formatDate(item.createdAt)}</span></td>
                     <td><span className={`app-status app-status--${item.status}`}>{statusLabels.get(item.status) ?? item.status}</span></td>
+                    {canUpdate && <td><div className="app-row-actions"><button type="button" className="app-secondary-button" aria-label={"Editar cliente "+item.name} disabled={saving} onClick={() => void openEdit(item.id)}>Editar</button><button type="button" className="app-secondary-button is-danger" aria-label={"Excluir cliente "+item.name} disabled={saving} onClick={() => void removeContact(item.id,item.name)}>Excluir</button></div></td>}
                   </tr>
                 ))}</tbody>
               </table>
@@ -202,21 +254,22 @@ export function ClientsPage({ organizationId, canCreate }: ClientsPageProps) {
       {modalOpen && (
         <div className="app-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setModalOpen(false); }}>
           <section className="app-modal" role="dialog" aria-modal="true" aria-labelledby="new-client-title">
-            <header><div><span className="app-section-eyebrow">Cadastro único</span><h2 id="new-client-title">Novo cliente</h2></div><button type="button" onClick={() => setModalOpen(false)} disabled={saving} aria-label="Fechar">×</button></header>
-            <form onSubmit={(event) => void handleCreate(event)}>
+            <header><div><span className="app-section-eyebrow">Cadastro único</span><h2 id="new-client-title">{selectedContact ? "Editar cliente" : "Novo cliente"}</h2></div><button type="button" onClick={() => setModalOpen(false)} disabled={saving} aria-label="Fechar">×</button></header>
+            <form key={selectedContact?.id ?? "new"} onSubmit={(event) => void handleSave(event)}>
               <div className="app-form-grid">
-                <label><span>Tipo</span><select name="kind" defaultValue="person"><option value="person">Pessoa física</option><option value="company">Pessoa jurídica</option></select></label>
-                <label className="is-wide"><span>Nome / razão social *</span><input name="name" maxLength={200} autoFocus /></label>
-                <label><span>Documento</span><input name="document" maxLength={32} /></label>
-                <label><span>E-mail</span><input name="email" type="email" maxLength={320} /></label>
-                <label><span>Telefone</span><input name="phone" maxLength={32} /></label>
-                <label><span>WhatsApp</span><input name="whatsapp" maxLength={32} /></label>
-                <label><span>Cidade</span><input name="city" maxLength={120} /></label>
-                <label><span>UF</span><input name="state" maxLength={2} /></label>
+                <label><span>Tipo</span><select name="kind" defaultValue={selectedContact?.kind ?? "person"}><option value="person">Pessoa física</option><option value="company">Pessoa jurídica</option></select></label>
+                {selectedContact && <label><span>Status</span><select name="status" defaultValue={selectedContact.status}><option value="active">Ativo</option><option value="inactive">Inativo</option><option value="blocked">Bloqueado</option><option value="archived">Arquivado</option></select></label>}
+                <label className="is-wide"><span>Nome / razão social *</span><input name="name" defaultValue={selectedContact?.name ?? ""} maxLength={200} autoFocus /></label>
+                <label><span>Documento</span><input name="document" defaultValue={selectedContact?.document ?? ""} maxLength={32} /></label>
+                <label><span>E-mail</span><input name="email" defaultValue={selectedContact?.email ?? ""} type="email" maxLength={320} /></label>
+                <label><span>Telefone</span><input name="phone" defaultValue={selectedContact?.phone ?? ""} maxLength={32} /></label>
+                <label><span>WhatsApp</span><input name="whatsapp" defaultValue={selectedContact?.whatsapp ?? ""} maxLength={32} /></label>
+                <label><span>Cidade</span><input name="city" defaultValue={selectedContact?.city ?? ""} maxLength={120} /></label>
+                <label><span>UF</span><input name="state" defaultValue={selectedContact?.state ?? ""} maxLength={2} /></label>
               </div>
               <fieldset className="app-profile-fieldset"><legend>Classificações</legend><div className="app-profile-options">{profileOptions.map((item) => <button key={item.value} type="button" className={selectedProfiles.includes(item.value) ? "is-selected" : ""} onClick={() => toggleProfile(item.value)}>{item.label}</button>)}</div></fieldset>
               {formError && <div className="app-inline-error">{formError}</div>}
-              <footer><button className="app-secondary-button" type="button" onClick={() => setModalOpen(false)} disabled={saving}>Cancelar</button><button className="app-primary-button" type="submit" disabled={saving}>{saving ? "Salvando..." : "Cadastrar cliente"}</button></footer>
+              <footer><button className="app-secondary-button" type="button" onClick={() => setModalOpen(false)} disabled={saving}>Cancelar</button><button className="app-primary-button" type="submit" disabled={saving}>{saving ? "Salvando..." : selectedContact ? "Salvar alterações" : "Cadastrar cliente"}</button></footer>
             </form>
           </section>
         </div>

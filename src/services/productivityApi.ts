@@ -100,3 +100,9 @@ export async function listAgenda(organizationId: string, from: Date, to: Date): 
 export async function createCalendarEvent(organizationId: string, input: CalendarEventInput): Promise<AgendaItem> {
   return tenantRequest<AgendaItem>(organizationId, "/productivity/calendar", { method: "POST", body: JSON.stringify(input) });
 }
+export async function getCalendarEvent(organizationId: string, eventId: string): Promise<AgendaItem> {
+  return tenantRequest<AgendaItem>(organizationId, `/productivity/calendar/${encodeURIComponent(eventId)}`);
+}
+export async function updateCalendarEvent(organizationId: string, eventId: string, input: CalendarEventInput): Promise<AgendaItem> {
+  return tenantRequest<AgendaItem>(organizationId, `/productivity/calendar/${encodeURIComponent(eventId)}`, { method: "PATCH", body: JSON.stringify(input) });
+}

@@ -1,12 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { clearAuthSession } from "../../auth/session";
 import { AppApiError } from "../../services/appApi";
 import {
   assignLead,
+  createLead,
+  convertLead,
   distributeLead,
   listLeads,
   recordLeadFirstResponse,
+  updateLead,
   type LeadAssignmentResult,
+  type LeadListItem,
+  type LeadStatus,
   type LeadListResult,
 } from "../../services/crmApi";
 import {
@@ -76,6 +81,30 @@ function policyForIntent(
   return settings?.policies.find((policy) => policy.intent === intent) ?? null;
 }
 
+function LeadCreateModal({ organizationId, onClose, onSaved }: { organizationId: string; onClose: () => void; onSaved: () => void }) {
+  const [intent, setIntent] = useState<"buyer" | "capture">("buyer"); const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [phone, setPhone] = useState(""); const [message, setMessage] = useState(""); const [saving, setSaving] = useState(false); const [error, setError] = useState<string | null>(null);
+  async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!name.trim() || (!email.trim() && !phone.trim()) || saving) return; setSaving(true); setError(null); try { await createLead(organizationId, { intent, source: "manual", name: name.trim(), email: email.trim() || null, phone: phone.trim() || null, message: message.trim() || null, campaign: null, sourcePage: null, propertyType: null, regionCity: null, regionState: null, relatedPropertyId: null }); onSaved(); } catch (saveError) { setError(saveError instanceof AppApiError ? saveError.message : "Não foi possível criar o lead."); } finally { setSaving(false); } }
+  return <div className="app-modal-backdrop"><section className="app-modal" role="dialog" aria-modal="true"><header className="app-modal__header"><div><span className="app-section-eyebrow">Leads</span><h2>Novo lead</h2></div><button type="button" onClick={onClose} disabled={saving}>×</button></header><form onSubmit={submit}><div className="app-modal__body app-task-form-grid">{error && <div className="app-inline-error is-wide">{error}</div>}<label><span>Intenção</span><select value={intent} onChange={(event) => setIntent(event.target.value as "buyer" | "capture")}><option value="buyer">Comprador / locatário</option><option value="capture">Proprietário / captação</option></select></label><label className="is-wide"><span>Nome *</span><input value={name} onChange={(event) => setName(event.target.value)} required autoFocus /></label><label><span>E-mail</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label><span>Telefone</span><input value={phone} onChange={(event) => setPhone(event.target.value)} /></label><label className="is-wide"><span>Mensagem</span><textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={4} /></label></div><footer className="app-modal__footer"><button type="button" className="app-secondary-button" onClick={onClose}>Fechar</button><button type="submit" className="app-primary-button" disabled={saving || !name.trim() || (!email.trim() && !phone.trim())}>{saving ? "Criando..." : "Criar lead"}</button></footer></form></section></div>;
+}
+
+function LeadEditModal({ organizationId, item, onClose, onSaved }: { organizationId: string; item: LeadListItem; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(item.name);
+  const [email, setEmail] = useState(item.email ?? "");
+  const [phone, setPhone] = useState(item.phone ?? "");
+  const [message, setMessage] = useState(item.message ?? "");
+  const [status, setStatus] = useState<LeadStatus>(item.status);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); if (!name.trim() || saving) return;
+    setSaving(true); setError(null);
+    try { await updateLead(organizationId, item.id, { name: name.trim(), email: email.trim() || null, phone: phone.trim() || null, message: message.trim() || null, status }); onSaved(); }
+    catch (saveError) { setError(saveError instanceof AppApiError ? saveError.message : "Não foi possível atualizar o lead."); }
+    finally { setSaving(false); }
+  }
+  return <div className="app-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}><section className="app-modal" role="dialog" aria-modal="true"><header className="app-modal__header"><div><span className="app-section-eyebrow">Lead</span><h2>Editar lead</h2></div><button type="button" onClick={onClose} disabled={saving}>×</button></header><form onSubmit={submit}><div className="app-modal__body app-task-form-grid">{error && <div className="app-inline-error is-wide">{error}</div>}<label className="is-wide"><span>Nome *</span><input value={name} onChange={(event) => setName(event.target.value)} maxLength={200} required autoFocus /></label><label><span>E-mail</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={320} /></label><label><span>Telefone</span><input value={phone} onChange={(event) => setPhone(event.target.value)} maxLength={32} /></label><label className="is-wide"><span>Status</span><select value={status} onChange={(event) => setStatus(event.target.value as LeadStatus)} disabled={item.status === "converted"}><option value="new">Novo</option><option value="in_progress">Em atendimento</option><option value="invalid">Inválido</option><option value="duplicate">Duplicado</option><option value="spam">Spam</option><option value="archived">Arquivado</option>{item.status === "converted" && <option value="converted">Convertido</option>}</select></label><label className="is-wide"><span>Mensagem</span><textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={5} maxLength={4000} /></label></div><footer className="app-modal__footer"><button type="button" className="app-secondary-button" onClick={onClose} disabled={saving}>Fechar</button><button type="submit" className="app-primary-button" disabled={saving || !name.trim() || item.status === "converted"}>{saving ? "Salvando..." : "Salvar alterações"}</button></footer></form></section></div>;
+}
+
 export function LeadsPage({ organizationId, canManage }: { organizationId: string; canManage: boolean }) {
   const [data, setData] = useState<LeadListResult | null>(null);
   const [distribution, setDistribution] = useState<OrganizationLeadDistributionSettings | null>(null);
@@ -89,6 +118,10 @@ export function LeadsPage({ organizationId, canManage }: { organizationId: strin
   const [page, setPage] = useState(1);
   const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, string>>(Object.create(null));
   const [busyLeadId, setBusyLeadId] = useState<string | null>(null);
+  const [selectedLeadId, setSelectedLeadId] = useState("");
+  const [editingLead, setEditingLead] = useState<LeadListItem | null>(null);
+  const [creatingLead, setCreatingLead] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     const timeout = globalThis.setTimeout(() => { setDebouncedSearch(search.trim()); setPage(1); }, 300);
@@ -124,7 +157,7 @@ export function LeadsPage({ organizationId, canManage }: { organizationId: strin
       })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [organizationId, debouncedSearch, intent, status, page, canManage]);
+  }, [organizationId, debouncedSearch, intent, status, page, canManage, reloadKey]);
 
   const filtered = Boolean(debouncedSearch || intent || status);
   const summary = data?.summary ?? { pending: 0, inProgress: 0, converted: 0, archived: 0, total: 0, lastReceivedAt: null, averageFirstResponseMinutes: null };
@@ -197,11 +230,22 @@ export function LeadsPage({ organizationId, canManage }: { organizationId: strin
     }
   }
 
+  async function convertSelectedLead() {
+    if (!canManage || !selectedLeadId || busyLeadId) return;
+    const selected = data?.items.find((item) => item.id === selectedLeadId);
+    if (!selected || (selected.status !== "new" && selected.status !== "in_progress")) return;
+    if (!globalThis.confirm(`Converter o lead de ${selected.name} em cliente e oportunidade no funil?`)) return;
+    setBusyLeadId(selected.id); setActionMessage(null);
+    try { const result = await convertLead(organizationId, selected.id); setSelectedLeadId(""); setActionMessage({ type: "success", text: `Lead convertido. Cliente e oportunidade criados no funil ${result.funnelCode === "capture" ? "de captação" : "de compradores"}.` }); setReloadKey((value) => value + 1); }
+    catch (conversionError) { setActionMessage({ type: "error", text: conversionError instanceof AppApiError ? conversionError.message : "Não foi possível converter o lead." }); }
+    finally { setBusyLeadId(null); }
+  }
+
   return (
     <>
       <section className="app-section-header">
         <div><span className="app-section-eyebrow">CRM & Vendas</span><h1>Leads do site</h1><p>Uma fila única com intenção identificada para compradores/locatários ou proprietários/captação.</p></div>
-        <div className="app-last-received"><span>Último recebido</span><strong>{summary.lastReceivedAt ? formatDateTime(summary.lastReceivedAt) : "—"}</strong></div>
+        <div className="app-page-heading__actions">{canManage && <button type="button" className="app-primary-button" onClick={() => setCreatingLead(true)}>+ Novo lead</button>}<div className="app-last-received"><span>Último recebido</span><strong>{summary.lastReceivedAt ? formatDateTime(summary.lastReceivedAt) : "—"}</strong></div></div>
       </section>
 
       <section className="app-summary-cards" aria-label="Resumo de leads">
@@ -219,6 +263,7 @@ export function LeadsPage({ organizationId, canManage }: { organizationId: strin
           <label><span>Status</span><select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="">Todos</option><option value="new">Novos</option><option value="in_progress">Em atendimento</option><option value="converted">Convertidos</option><option value="invalid">Inválidos</option><option value="duplicate">Duplicados</option><option value="spam">Spam</option><option value="archived">Arquivados</option></select></label>
           <button className="app-filter-clear" type="button" onClick={clearFilters} disabled={!filtered}>Limpar</button>
         </div>
+        {canManage && data && data.items.length > 0 && <div className="app-filter-bar"><label><span>Gerenciar lead</span><select value={selectedLeadId} onChange={(event) => setSelectedLeadId(event.target.value)}><option value="">Selecione um lead</option>{data.items.map((item) => <option key={item.id} value={item.id}>{item.name} · {statusLabels.get(item.status) ?? item.status}</option>)}</select></label><button className="app-secondary-button" type="button" disabled={!selectedLeadId} onClick={() => setEditingLead(data.items.find((item) => item.id === selectedLeadId) ?? null)}>Abrir e editar</button><button className="app-primary-button" type="button" disabled={!selectedLeadId || Boolean(busyLeadId) || !["new", "in_progress"].includes(data.items.find((item) => item.id === selectedLeadId)?.status ?? "")} onClick={() => void convertSelectedLead()}>{busyLeadId === selectedLeadId ? "Convertendo..." : "Converter em oportunidade"}</button></div>}
 
         {actionMessage && <div className={actionMessage.type === "error" ? "app-inline-error" : "app-inline-success"}>{actionMessage.text}</div>}
         {error ? <div className="app-inline-error">{error}</div> : loading && !data ? <div className="app-list-loading">Carregando leads...</div> : data && data.items.length > 0 ? (
@@ -238,6 +283,8 @@ export function LeadsPage({ organizationId, canManage }: { organizationId: strin
           </>
         ) : <div className="app-list-empty"><GlobeIcon /><strong>{filtered ? "Nenhum lead encontrado" : "Nenhum lead recebido ainda"}</strong><span>{filtered ? "Ajuste ou limpe os filtros para tentar novamente." : "Os formulários do site alimentarão esta fila preservando intenção, origem e contexto."}</span></div>}
       </section>
+      {editingLead && <LeadEditModal organizationId={organizationId} item={editingLead} onClose={() => setEditingLead(null)} onSaved={() => { setEditingLead(null); setSelectedLeadId(""); setActionMessage({ type: "success", text: "Lead atualizado com sucesso." }); setReloadKey((value) => value + 1); }} />}
+      {creatingLead && <LeadCreateModal organizationId={organizationId} onClose={() => setCreatingLead(false)} onSaved={() => { setCreatingLead(false); setReloadKey((value) => value + 1); }} />}
     </>
   );
 }

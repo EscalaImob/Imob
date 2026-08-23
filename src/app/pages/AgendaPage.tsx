@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppApiError } from "../../services/appApi";
-import { createCalendarEvent, listAgenda, listTaskAssignees, type AgendaItem, type CalendarEventType, type ProductivityAssignee } from "../../services/productivityApi";
+import { createCalendarEvent, listAgenda, listTaskAssignees, updateCalendarEvent, type AgendaItem, type CalendarEventType, type ProductivityAssignee } from "../../services/productivityApi";
 import { CalendarIcon, PinIcon, TasksIcon } from "../icons";
 
 function startOfDay(date: Date) { const value = new Date(date); value.setHours(0, 0, 0, 0); return value; }
@@ -13,16 +13,18 @@ function labelDate(date: Date) { return new Intl.DateTimeFormat("pt-BR", { day: 
 function labelTime(value: string) { return new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(value)); }
 function eventTypeLabel(type: AgendaItem["type"]) { return ({ task: "Tarefa", visit: "Visita", meeting: "Reunião", evaluation: "Avaliação", signature: "Assinatura", inspection: "Vistoria", custom: "Compromisso" } as const)[type] ?? "Compromisso"; }
 
-function EventModal({ organizationId, defaultDate, onClose, onSaved }: { organizationId: string; defaultDate: Date; onClose: () => void; onSaved: () => void }) {
+function EventModal({ organizationId, defaultDate, eventItem, onClose, onSaved }: { organizationId: string; defaultDate: Date; eventItem?: AgendaItem; onClose: () => void; onSaved: () => void }) {
+  const editing = Boolean(eventItem);
   const [assignees, setAssignees] = useState<ProductivityAssignee[]>([]);
-  const [type, setType] = useState<CalendarEventType>("meeting");
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const initialStart = useMemo(() => { const value = new Date(defaultDate); if (value.getHours() === 0) value.setHours(9); return value; }, [defaultDate]);
+  const [type, setType] = useState<CalendarEventType>((eventItem?.type as CalendarEventType | undefined) ?? "meeting");
+  const [title, setTitle] = useState(eventItem?.title ?? "");
+  const [description, setDescription] = useState(eventItem?.description ?? "");
+  const [status, setStatus] = useState<"scheduled" | "completed" | "canceled">(eventItem?.status === "completed" || eventItem?.status === "canceled" ? eventItem.status : "scheduled");
+  const initialStart = useMemo(() => { const value = eventItem ? new Date(eventItem.startsAt) : new Date(defaultDate); if (value.getHours() === 0) value.setHours(9); return value; }, [defaultDate, eventItem]);
   const [startsAt, setStartsAt] = useState(localInput(initialStart));
-  const [endsAt, setEndsAt] = useState(localInput(new Date(initialStart.getTime() + 60 * 60_000)));
-  const [responsibleMembershipId, setResponsibleMembershipId] = useState("");
-  const [privateEvent, setPrivateEvent] = useState(false);
+  const [endsAt, setEndsAt] = useState(localInput(eventItem ? new Date(eventItem.endsAt) : new Date(initialStart.getTime() + 60 * 60_000)));
+  const [responsibleMembershipId, setResponsibleMembershipId] = useState(eventItem?.responsible?.membershipId ?? "");
+  const [privateEvent, setPrivateEvent] = useState(eventItem?.private ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { void listTaskAssignees(organizationId).then((items) => { setAssignees(items); }).catch((loadError) => setError(loadError instanceof AppApiError ? loadError.message : "Não foi possível carregar responsáveis.")); }, [organizationId]);
@@ -31,11 +33,12 @@ function EventModal({ organizationId, defaultDate, onClose, onSaved }: { organiz
     const start = new Date(startsAt); const end = new Date(endsAt);
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) { setError("Informe um horário válido para o compromisso."); return; }
     setSaving(true); setError(null);
-    try { await createCalendarEvent(organizationId, { type, title: title.trim(), ...(description.trim() ? { description: description.trim() } : {}), startsAt: start.toISOString(), endsAt: end.toISOString(), ...(responsibleMembershipId ? { responsibleMembershipId } : {}), private: privateEvent }); onSaved(); }
-    catch (saveError) { setError(saveError instanceof AppApiError ? saveError.message : "Não foi possível criar o compromisso."); }
+    const input = { type, title: title.trim(), ...(description.trim() ? { description: description.trim() } : {}), startsAt: start.toISOString(), endsAt: end.toISOString(), status, ...(responsibleMembershipId ? { responsibleMembershipId } : {}), private: privateEvent };
+    try { if (eventItem) await updateCalendarEvent(organizationId, eventItem.id, input); else await createCalendarEvent(organizationId, input); onSaved(); }
+    catch (saveError) { setError(saveError instanceof AppApiError ? saveError.message : `Não foi possível ${editing ? "atualizar" : "criar"} o compromisso.`); }
     finally { setSaving(false); }
   }
-  return <div className="app-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}><section className="app-modal app-calendar-modal" role="dialog" aria-modal="true"><header className="app-modal__header"><div><span className="app-section-eyebrow">Agenda</span><h2>Novo compromisso</h2></div><button type="button" onClick={onClose} disabled={saving}>×</button></header><form onSubmit={submit}><div className="app-modal__body app-task-form-grid">{error && <div className="app-inline-error is-wide">{error}</div>}<label><span>Tipo</span><select value={type} onChange={(event) => setType(event.target.value as CalendarEventType)}><option value="meeting">Reunião</option><option value="evaluation">Avaliação</option><option value="signature">Assinatura</option><option value="inspection">Vistoria</option><option value="custom">Compromisso</option></select></label><label><span>Responsável</span><select value={responsibleMembershipId} onChange={(event) => setResponsibleMembershipId(event.target.value)}><option value="">Eu (padrão)</option>{assignees.map((item) => <option key={item.membershipId} value={item.membershipId}>{item.displayName}</option>)}</select></label><label className="is-wide"><span>Título *</span><input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={220} required autoFocus /></label><label><span>Início</span><input type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} required /></label><label><span>Fim</span><input type="datetime-local" value={endsAt} onChange={(event) => setEndsAt(event.target.value)} required /></label><label className="is-wide"><span>Descrição</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={4} maxLength={4000} /></label><label className="app-checkbox-field is-wide"><input type="checkbox" checked={privateEvent} onChange={(event) => setPrivateEvent(event.target.checked)} /><span>Compromisso privado</span></label></div><footer className="app-modal__footer"><button type="button" className="app-secondary-button" onClick={onClose}>Cancelar</button><button type="submit" className="app-primary-button" disabled={saving || !title.trim()}>{saving ? "Salvando..." : "Criar compromisso"}</button></footer></form></section></div>;
+  return <div className="app-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}><section className="app-modal app-calendar-modal" role="dialog" aria-modal="true"><header className="app-modal__header"><div><span className="app-section-eyebrow">Agenda</span><h2>{editing ? "Editar compromisso" : "Novo compromisso"}</h2></div><button type="button" onClick={onClose} disabled={saving}>×</button></header><form onSubmit={submit}><div className="app-modal__body app-task-form-grid">{error && <div className="app-inline-error is-wide">{error}</div>}<label><span>Tipo</span><select value={type} onChange={(event) => setType(event.target.value as CalendarEventType)}><option value="meeting">Reunião</option><option value="evaluation">Avaliação</option><option value="signature">Assinatura</option><option value="inspection">Vistoria</option><option value="custom">Compromisso</option></select></label><label><span>Responsável</span><select value={responsibleMembershipId} onChange={(event) => setResponsibleMembershipId(event.target.value)}><option value="">Eu (padrão)</option>{assignees.map((item) => <option key={item.membershipId} value={item.membershipId}>{item.displayName}</option>)}</select></label>{editing && <label><span>Status</span><select value={status} onChange={(event) => setStatus(event.target.value as typeof status)}><option value="scheduled">Agendado</option><option value="completed">Concluído</option><option value="canceled">Cancelado</option></select></label>}<label className="is-wide"><span>Título *</span><input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={220} required autoFocus /></label><label><span>Início</span><input type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} required /></label><label><span>Fim</span><input type="datetime-local" value={endsAt} onChange={(event) => setEndsAt(event.target.value)} required /></label><label className="is-wide"><span>Descrição</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={4} maxLength={4000} /></label><label className="app-checkbox-field is-wide"><input type="checkbox" checked={privateEvent} onChange={(event) => setPrivateEvent(event.target.checked)} /><span>Compromisso privado</span></label></div><footer className="app-modal__footer"><button type="button" className="app-secondary-button" onClick={onClose}>Fechar</button><button type="submit" className="app-primary-button" disabled={saving || !title.trim()}>{saving ? "Salvando..." : editing ? "Salvar alterações" : "Criar compromisso"}</button></footer></form></section></div>;
 }
 
 export function AgendaPage({ organizationId, canCreate }: { organizationId: string; canCreate: boolean }) {
@@ -45,6 +48,19 @@ export function AgendaPage({ organizationId, canCreate }: { organizationId: stri
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalDate, setModalDate] = useState<Date | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<AgendaItem | null>(null);
+  function openEvent(item: AgendaItem) { if (item.source !== "event") return; setSelectedEvent(item); setModalDate(new Date(item.startsAt)); }
+  useEffect(() => {
+    function handleEventClick(domEvent: MouseEvent) {
+      const target = domEvent.target instanceof Element ? domEvent.target : null;
+      const entry = target?.closest(".source-event, .app-calendar-list article");
+      if (!entry) return;
+      const eventItem = items.find((item) => item.source === "event" && entry.textContent?.includes(item.title));
+      if (eventItem) openEvent(eventItem);
+    }
+    document.addEventListener("click", handleEventClick);
+    return () => document.removeEventListener("click", handleEventClick);
+  }, [items]);
   const range = useMemo(() => {
     if (view === "month") return { from: startOfWeek(startOfMonth(anchor)), to: endOfMonthGrid(anchor) };
     if (view === "week") { const from = startOfWeek(anchor); return { from, to: addDays(from, 7) }; }
@@ -63,6 +79,6 @@ export function AgendaPage({ organizationId, canCreate }: { organizationId: stri
     {error && <div className="app-inline-error">{error}</div>}
     <section className="app-calendar-toolbar"><div><button type="button" onClick={() => navigate(-1)}>‹</button><button type="button" onClick={() => setAnchor(new Date())}>Hoje</button><button type="button" onClick={() => navigate(1)}>›</button></div><strong>{title}</strong><div className="app-segmented"><button type="button" className={view === "month" ? "is-active" : ""} onClick={() => setView("month")}>Mês</button><button type="button" className={view === "week" ? "is-active" : ""} onClick={() => setView("week")}>Semana</button><button type="button" className={view === "day" ? "is-active" : ""} onClick={() => setView("day")}>Dia</button><button type="button" className={view === "list" ? "is-active" : ""} onClick={() => setView("list")}>Lista</button></div></section>
     {loading ? <div className="app-list-loading">Carregando agenda...</div> : view === "month" ? <section className="app-calendar-month"><header>{["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((day) => <span key={day}>{day}</span>)}</header><div className="app-calendar-month__grid">{monthDays.map((date) => <button type="button" className={`app-calendar-day${date.getMonth() !== anchor.getMonth() ? " is-outside" : ""}`} key={date.toISOString()} onDoubleClick={() => canCreate && setModalDate(date)}><strong>{date.getDate()}</strong><div>{itemsForDay(date).slice(0, 3).map((item) => <span className={`app-calendar-chip source-${item.source}`} key={`${item.source}-${item.id}`}><em>{item.allDay ? "" : labelTime(item.startsAt)}</em>{item.title}</span>)}{itemsForDay(date).length > 3 && <small>+ {itemsForDay(date).length - 3} itens</small>}</div></button>)}</div></section> : view === "week" ? <section className="app-calendar-week">{Array.from({ length: 7 }, (_, index) => addDays(range.from, index)).map((date) => <article key={date.toISOString()}><header><strong>{new Intl.DateTimeFormat("pt-BR", { weekday: "short" }).format(date)}</strong><span>{date.getDate()}</span></header><div>{itemsForDay(date).length === 0 ? <small>Sem compromissos</small> : itemsForDay(date).map((item) => <div className={`app-agenda-item source-${item.source}`} key={`${item.source}-${item.id}`}><time>{item.allDay ? "Prazo" : labelTime(item.startsAt)}</time><strong>{item.title}</strong><span>{eventTypeLabel(item.type)} · {item.responsible?.displayName ?? "Sem responsável"}</span></div>)}</div></article>)}</section> : <section className="app-calendar-list">{items.length === 0 ? <div className="app-productivity-empty"><CalendarIcon /><h2>Nenhum compromisso no período</h2><p>Crie um compromisso ou agende uma tarefa para vê-la aqui.</p></div> : items.map((item) => <article key={`${item.source}-${item.id}`}><div className="app-agenda-item__icon">{item.source === "task" ? <TasksIcon /> : item.source === "visit" ? <PinIcon /> : <CalendarIcon />}</div><div><strong>{item.title}</strong><span>{eventTypeLabel(item.type)}{item.opportunity ? ` · ${item.opportunity.title}` : ""}</span></div><div><strong>{new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit" }).format(new Date(item.startsAt))}</strong><span>{item.allDay ? "Prazo" : `${labelTime(item.startsAt)} — ${labelTime(item.endsAt)}`}</span></div><span>{item.responsible?.displayName ?? "—"}</span></article>)}</section>}
-    {modalDate && <EventModal organizationId={organizationId} defaultDate={modalDate} onClose={() => setModalDate(null)} onSaved={() => { setModalDate(null); void load(); }} />}
+    {modalDate && <EventModal organizationId={organizationId} defaultDate={modalDate} eventItem={selectedEvent ?? undefined} onClose={() => { setModalDate(null); setSelectedEvent(null); }} onSaved={() => { setModalDate(null); setSelectedEvent(null); void load(); }} />}
   </>;
 }
