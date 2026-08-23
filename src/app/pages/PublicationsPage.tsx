@@ -1,49 +1,800 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppApiError } from "../../services/appApi";
-import { createPublication, getPublicationOptions, listPublications, updatePublication, type PortfolioPublicationChannel, type PortfolioPublicationFormat, type PortfolioPublicationObjective, type PortfolioPublicationStatus, type PublicationFields, type PublicationListItem, type PublicationListResult, type PublicationOptions, type PublicationPropertyOption } from "../../services/publicationsApi";
+import {
+  createPublication,
+  getPublicationOptions,
+  listPublications,
+  updatePublication,
+  type PortfolioPublicationChannel,
+  type PortfolioPublicationFormat,
+  type PortfolioPublicationObjective,
+  type PortfolioPublicationStatus,
+  type PublicationFields,
+  type PublicationListItem,
+  type PublicationListResult,
+  type PublicationOptions,
+  type PublicationPropertyOption,
+} from "../../services/publicationsApi";
 import { SearchIcon, ShareIcon } from "../icons";
-interface Props{organizationId:string;canCreate:boolean;canUpdate:boolean}
-const statusLabels:Record<PortfolioPublicationStatus,string>={draft:"Rascunho",approved:"Aprovada",scheduled:"Agendada",published:"Publicada",failed:"Falhou",canceled:"Cancelada"};
-const channelLabels:Record<PortfolioPublicationChannel,string>={instagram:"Instagram",facebook:"Facebook",whatsapp:"WhatsApp",other:"Outro canal"};
-const formatLabels:Record<PortfolioPublicationFormat,string>={feed:"Feed",story:"Story",carousel:"Carrossel",banner:"Banner"};
-const objectiveLabels:Record<PortfolioPublicationObjective,string>={sell:"Venda",rent:"Locação",showcase:"Destaque institucional",capture:"Captação"};
-const transitions:Record<PortfolioPublicationStatus,readonly PortfolioPublicationStatus[]>={draft:["draft","approved","canceled"],approved:["draft","approved","scheduled","published","canceled"],scheduled:["approved","scheduled","published","failed","canceled"],failed:["draft","approved","failed","canceled"],published:["published"],canceled:["canceled"]};
-function dateTimeLabel(value:string|null){if(!value)return"—";return new Intl.DateTimeFormat("pt-BR",{dateStyle:"short",timeStyle:"short"}).format(new Date(value));}
-function toLocalInput(value:string|null){if(!value)return"";const date=new Date(value);return new Date(date.getTime()-date.getTimezoneOffset()*60_000).toISOString().slice(0,16);}
-function fromLocalInput(value:string){return value?new Date(value).toISOString():null;}
-function emptyFields(property?:PublicationPropertyOption):PublicationFields{return{propertyId:property?.id??"",objective:property?.defaults.objective??"sell",channel:"instagram",format:"feed",status:"draft",title:property?.defaults.title??"",caption:property?.defaults.caption??"",cta:property?.defaults.cta??null,hashtags:property?.defaults.hashtags??[],campaignName:null,trackingLink:null,scheduledAt:null};}
-function PublicationModal({organizationId,options,item,initialPropertyId,canWrite,onClose,onSaved}:{organizationId:string;options:PublicationOptions;item:PublicationListItem|null;initialPropertyId:string;canWrite:boolean;onClose:()=>void;onSaved:()=>void}){
-  const initialProperty=options.properties.find(property=>property.id===(item?.propertyId||initialPropertyId));
-  const[draft,setDraft]=useState<PublicationFields>(()=>item?{propertyId:item.propertyId,objective:item.objective,channel:item.channel,format:item.format,status:item.status,title:item.title,caption:item.caption,cta:item.cta,hashtags:item.hashtags,campaignName:item.campaignName,trackingLink:item.trackingLink,scheduledAt:item.scheduledAt}:emptyFields(initialProperty));
-  const[hashtagText,setHashtagText]=useState(()=>draft.hashtags.join(" "));const[saving,setSaving]=useState(false);const[error,setError]=useState<string|null>(null);
-  const property=options.properties.find(candidate=>candidate.id===draft.propertyId)??null;const terminal=item?.status==="published"||item?.status==="canceled";const allowedStatuses=item?transitions[item.status]:(["draft","approved","scheduled","published","canceled"] as const);const requiresReadiness=["approved","scheduled","published"].includes(draft.status);
-  const set=<K extends keyof PublicationFields>(key:K,value:PublicationFields[K])=>setDraft(current=>({...current,[key]:value}));
-  function chooseProperty(propertyId:string){const next=options.properties.find(candidate=>candidate.id===propertyId);if(!next){set("propertyId","");return;}setDraft(current=>({...emptyFields(next),channel:current.channel,format:current.format}));setHashtagText(next.defaults.hashtags.join(" "));}
-  async function save(event:FormEvent){event.preventDefault();if(terminal||!canWrite)return;setSaving(true);setError(null);const hashtags=[...new Set(hashtagText.split(/[\s,]+/u).map(value=>value.trim()).filter(Boolean).map(value=>value.startsWith("#")?value:`#${value}`))];try{const payload={...draft,hashtags};if(item)await updatePublication(organizationId,item.id,payload);else await createPublication(organizationId,payload);onSaved();}catch(saveError){setError(saveError instanceof AppApiError?saveError.message:"Não foi possível salvar a publicação.");}finally{setSaving(false);}}
-  return <div className="app-modal-backdrop" role="presentation"><section className="app-modal app-publication-modal" role="dialog" aria-modal="true" aria-label={item?"Editar publicação":"Nova publicação"}><header><div><span className="app-section-eyebrow">Portfólio · Publicações</span><h2>{item?"Editar publicação":"Nova publicação"}</h2></div><button type="button" onClick={onClose} aria-label="Fechar">×</button></header><form onSubmit={event=>void save(event)}>{error&&<div className="app-inline-error">{error}</div>}<div className="app-form-grid">
-    <label className="is-wide"><span>Imóvel *</span><select value={draft.propertyId} disabled={Boolean(item)||terminal} onChange={event=>chooseProperty(event.target.value)}><option value="">Selecione um imóvel</option>{options.properties.map(option=><option key={option.id} value={option.id}>{option.internalCode} · {option.title}</option>)}</select></label>
-    {property&&<div className={`app-publication-readiness is-wide ${property.readiness.ready?"is-ready":"is-blocked"}`}><strong>{property.readiness.ready?"Imóvel apto para avançar":`${property.readiness.blockers.length} pendência(s) bloqueiam aprovação/agendamento`}</strong>{property.readiness.blockers.map(issue=><span key={issue.code}>• {issue.label}</span>)}{property.readiness.warnings.map(issue=><span className="is-warning" key={issue.code}>• {issue.label}</span>)}</div>}
-    <label><span>Objetivo *</span><select value={draft.objective} disabled={terminal} onChange={event=>set("objective",event.target.value as PortfolioPublicationObjective)}>{Object.entries(objectiveLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
-    <label><span>Canal *</span><select value={draft.channel} disabled={terminal} onChange={event=>set("channel",event.target.value as PortfolioPublicationChannel)}>{Object.entries(channelLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
-    <label><span>Formato *</span><select value={draft.format} disabled={terminal} onChange={event=>set("format",event.target.value as PortfolioPublicationFormat)}>{Object.entries(formatLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
-    <label><span>Status *</span><select value={draft.status} disabled={terminal} onChange={event=>set("status",event.target.value as PortfolioPublicationStatus)}>{allowedStatuses.map(value=><option key={value} value={value}>{value==="published"?"Publicada (registro manual)":statusLabels[value]}</option>)}</select></label>
-    <label className="is-wide"><span>Título *</span><input value={draft.title} disabled={terminal} onChange={event=>set("title",event.target.value)}/></label><label className="is-wide"><span>Legenda *</span><textarea rows={7} value={draft.caption} disabled={terminal} onChange={event=>set("caption",event.target.value)}/></label>
-    <label><span>CTA</span><input value={draft.cta??""} disabled={terminal} onChange={event=>set("cta",event.target.value||null)} placeholder="Ex.: Agende uma visita"/></label><label><span>Hashtags</span><input value={hashtagText} disabled={terminal} onChange={event=>setHashtagText(event.target.value)} placeholder="#Imoveis #Venda"/></label>
-    <label><span>Campanha</span><input value={draft.campaignName??""} disabled={terminal} onChange={event=>set("campaignName",event.target.value||null)}/></label><label><span>Link de rastreamento</span><input type="url" value={draft.trackingLink??""} disabled={terminal} onChange={event=>set("trackingLink",event.target.value||null)} placeholder="https://..."/></label>
-    {(draft.status==="scheduled"||draft.scheduledAt)&&<label className="is-wide"><span>Agendar para *</span><input type="datetime-local" value={toLocalInput(draft.scheduledAt)} disabled={terminal} onChange={event=>set("scheduledAt",fromLocalInput(event.target.value))}/></label>}
-  </div>{requiresReadiness&&property&&!property.readiness.ready&&<p className="app-publication-block-note">Salve como rascunho ou corrija as pendências do imóvel antes de avançar este status.</p>}{terminal&&<p className="app-publication-block-note">Este registro está finalizado e permanece imutável para preservar o histórico. Crie uma nova publicação para uma nova divulgação.</p>}<footer><button type="button" className="app-secondary-button" onClick={onClose}>Fechar</button>{!terminal&&canWrite&&<button type="submit" className="app-primary-button" disabled={saving||!draft.propertyId||!draft.title.trim()||!draft.caption.trim()||(requiresReadiness&&!property?.readiness.ready)||(draft.status==="scheduled"&&!draft.scheduledAt)}>{saving?"Salvando...":item?"Salvar publicação":"Criar publicação"}</button>}</footer></form></section></div>;
+interface Props {
+  organizationId: string;
+  canCreate: boolean;
+  canUpdate: boolean;
 }
-export function PublicationsPage({organizationId,canCreate,canUpdate}:Props){
-  const initialPropertyId=new URLSearchParams(globalThis.location.search).get("propertyId")?.trim()||"";const[search,setSearch]=useState("");const[status,setStatus]=useState<PortfolioPublicationStatus|"">("");const[channel,setChannel]=useState<PortfolioPublicationChannel|"">("");const[page,setPage]=useState(1);const[result,setResult]=useState<PublicationListResult|null>(null);const[options,setOptions]=useState<PublicationOptions|null>(null);const[loading,setLoading]=useState(true);const[error,setError]=useState<string|null>(null);const[modalItem,setModalItem]=useState<PublicationListItem|"new"|null>(null);
-  const query=useMemo(()=>({search:search.trim()||undefined,status:status||undefined,channel:channel||undefined,propertyId:initialPropertyId||undefined,page,pageSize:50}),[search,status,channel,initialPropertyId,page]);
-  const load=()=>{setLoading(true);setError(null);void Promise.all([listPublications(organizationId,query),getPublicationOptions(organizationId)]).then(([list,publicationOptions])=>{setResult(list);setOptions(publicationOptions);}).catch(loadError=>setError(loadError instanceof AppApiError?loadError.message:"Não foi possível carregar publicações.")).finally(()=>setLoading(false));};
-  useEffect(()=>{const handle=globalThis.setTimeout(load,220);return()=>globalThis.clearTimeout(handle);},[organizationId,query]);
-  const readiness=useMemo(()=>{const properties=options?.properties??[];return{ready:properties.filter(property=>property.readiness.ready).length,blocked:properties.filter(property=>!property.readiness.ready).length,warnings:properties.filter(property=>property.readiness.warnings.length>0).length};},[options]);const itemForModal=modalItem&&modalItem!=="new"?modalItem:null;
-  return <><section className="app-page-heading"><div><span className="app-section-eyebrow">Portfólio</span><h1>Publicações</h1><p>Planeje conteúdo, valide a prontidão do imóvel, aprove, agende e preserve o histórico de divulgação.</p></div>{canCreate&&<button className="app-primary-button" type="button" onClick={()=>setModalItem("new")}>+ Nova publicação</button>}</section>
-  <div className="app-publication-provider-banner"><ShareIcon/><div><strong>Núcleo de publicação ativo — integrações externas entram depois</strong><p>Este ciclo controla conteúdo, canal, formato, aprovação, agendamento e registro manual. Nenhuma publicação é enviada automaticamente para Meta ou outros provedores.</p></div></div>{error&&<div className="app-inline-error">{error}</div>}
-  <section className="app-metrics app-metrics--compact">{[["Imóveis no marketing",result?.propertiesInMarketing??0],["Rascunhos",result?.drafts??0],["Agendadas",result?.scheduled??0],["Publicadas 30 dias",result?.publishedLast30Days??0],["Com erro",result?.failed??0]].map(([label,value])=><article className="app-metric-card" key={String(label)}><span>{label}</span><strong>{value}</strong></article>)}</section>
-  <section className="app-publication-readiness-summary"><article><strong>{readiness.ready}</strong><span>imóveis aptos para avançar</span></article><article><strong>{readiness.blocked}</strong><span>com pendências bloqueantes</span></article><article><strong>{readiness.warnings}</strong><span>com alertas não bloqueantes</span></article><p>A ausência de autorização vigente gera alerta neste ciclo, não bloqueio automático. A política poderá ser configurável por organização depois.</p></section>
-  <section className="app-filter-panel app-publication-filters"><div className="app-search-field"><SearchIcon/><input placeholder="Publicação, imóvel, código ou campanha..." value={search} onChange={event=>{setSearch(event.target.value);setPage(1);}}/></div><select aria-label="Status" value={status} onChange={event=>{setStatus(event.target.value as PortfolioPublicationStatus|"");setPage(1);}}><option value="">Todos os status</option>{Object.entries(statusLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select><select aria-label="Canal" value={channel} onChange={event=>{setChannel(event.target.value as PortfolioPublicationChannel|"");setPage(1);}}><option value="">Todos os canais</option>{Object.entries(channelLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select>{(search||status||channel)&&<button type="button" className="app-secondary-button" onClick={()=>{setSearch("");setStatus("");setChannel("");setPage(1);}}>Limpar</button>}</section>
-  <section className="app-data-card">{loading?<div className="app-table-empty"><span className="app-spinner"/>Carregando publicações...</div>:!result?.items.length?<div className="app-table-empty"><ShareIcon/><h2>Nenhuma publicação registrada</h2><p>Crie um rascunho a partir de um imóvel. Pendências podem ser corrigidas antes da aprovação ou do agendamento.</p>{canCreate&&<button className="app-primary-button" type="button" onClick={()=>setModalItem("new")}>Criar primeira publicação</button>}</div>:<><div className="app-publication-table"><header><span>Publicação</span><span>Imóvel</span><span>Canal / formato</span><span>Status</span><span>Agendamento</span><span>Prontidão</span></header>{result.items.map(item=><button type="button" key={item.id} onClick={()=>setModalItem(item)}><span><strong>{item.title}</strong><small>{item.campaignName||objectiveLabels[item.objective]}</small></span><span><strong>{item.property.title}</strong><small>{item.property.internalCode}</small></span><span>{channelLabels[item.channel]}<small>{formatLabels[item.format]}</small></span><span><em className={`app-status-pill publication-${item.status}`}>{statusLabels[item.status]}</em></span><span>{item.status==="published"?dateTimeLabel(item.publishedAt):dateTimeLabel(item.scheduledAt)}</span><span className={item.readiness.ready?"is-ready":"is-blocked"}>{item.readiness.ready?"Apto":`${item.readiness.blockers.length} pendência(s)`}{item.readiness.warnings.length>0&&<small>{item.readiness.warnings.length} alerta(s)</small>}</span></button>)}</div><div className="app-pagination"><span>{result.totalItems} {result.totalItems===1?"publicação":"publicações"}</span><div><button type="button" disabled={result.page<=1} onClick={()=>setPage(current=>Math.max(1,current-1))}>Anterior</button><span>{result.page} / {result.totalPages}</span><button type="button" disabled={result.page>=result.totalPages} onClick={()=>setPage(current=>current+1)}>Próxima</button></div></div></>}</section>
-  {modalItem&&options&&<PublicationModal organizationId={organizationId} options={options} item={itemForModal} initialPropertyId={initialPropertyId} canWrite={modalItem==="new"?canCreate:canUpdate} onClose={()=>setModalItem(null)} onSaved={()=>{setModalItem(null);load();}}/>}</>;
+const statusLabels: Record<PortfolioPublicationStatus, string> = {
+  draft: "Rascunho",
+  approved: "Aprovada",
+  scheduled: "Agendada",
+  published: "Publicada",
+  failed: "Falhou",
+  canceled: "Cancelada",
+};
+const channelLabels: Record<PortfolioPublicationChannel, string> = {
+  instagram: "Instagram",
+  facebook: "Facebook",
+  whatsapp: "WhatsApp",
+  other: "Outro canal",
+};
+const formatLabels: Record<PortfolioPublicationFormat, string> = {
+  feed: "Feed",
+  story: "Story",
+  carousel: "Carrossel",
+  banner: "Banner",
+};
+const objectiveLabels: Record<PortfolioPublicationObjective, string> = {
+  sell: "Venda",
+  rent: "Locação",
+  showcase: "Destaque institucional",
+  capture: "Captação",
+};
+const transitions: Record<
+  PortfolioPublicationStatus,
+  readonly PortfolioPublicationStatus[]
+> = {
+  draft: ["draft", "approved", "canceled"],
+  approved: ["draft", "approved", "scheduled", "published", "canceled"],
+  scheduled: ["approved", "scheduled", "published", "failed", "canceled"],
+  failed: ["draft", "approved", "failed", "canceled"],
+  published: ["published"],
+  canceled: ["canceled"],
+};
+function dateTimeLabel(value: string | null) {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+function toLocalInput(value: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+    .toISOString()
+    .slice(0, 16);
+}
+function fromLocalInput(value: string) {
+  return value ? new Date(value).toISOString() : null;
+}
+function emptyFields(property?: PublicationPropertyOption): PublicationFields {
+  return {
+    propertyId: property?.id ?? "",
+    objective: property?.defaults.objective ?? "sell",
+    channel: "instagram",
+    format: "feed",
+    status: "draft",
+    title: property?.defaults.title ?? "",
+    caption: property?.defaults.caption ?? "",
+    cta: property?.defaults.cta ?? null,
+    hashtags: property?.defaults.hashtags ?? [],
+    campaignName: null,
+    trackingLink: null,
+    scheduledAt: null,
+  };
+}
+function PublicationModal({
+  organizationId,
+  options,
+  item,
+  initialPropertyId,
+  canWrite,
+  onClose,
+  onSaved,
+}: {
+  organizationId: string;
+  options: PublicationOptions;
+  item: PublicationListItem | null;
+  initialPropertyId: string;
+  canWrite: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const initialProperty = options.properties.find(
+    (property) => property.id === (item?.propertyId || initialPropertyId),
+  );
+  const [draft, setDraft] = useState<PublicationFields>(() =>
+    item
+      ? {
+          propertyId: item.propertyId,
+          objective: item.objective,
+          channel: item.channel,
+          format: item.format,
+          status: item.status,
+          title: item.title,
+          caption: item.caption,
+          cta: item.cta,
+          hashtags: item.hashtags,
+          campaignName: item.campaignName,
+          trackingLink: item.trackingLink,
+          scheduledAt: item.scheduledAt,
+        }
+      : emptyFields(initialProperty),
+  );
+  const [hashtagText, setHashtagText] = useState(() =>
+    draft.hashtags.join(" "),
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const property =
+    options.properties.find((candidate) => candidate.id === draft.propertyId) ??
+    null;
+  const terminal = item?.status === "published" || item?.status === "canceled";
+  const allowedStatuses = item
+    ? transitions[item.status]
+    : (["draft", "approved", "scheduled", "published", "canceled"] as const);
+  const requiresReadiness = ["approved", "scheduled", "published"].includes(
+    draft.status,
+  );
+  const set = <K extends keyof PublicationFields>(
+    key: K,
+    value: PublicationFields[K],
+  ) => setDraft((current) => ({ ...current, [key]: value }));
+  function chooseProperty(propertyId: string) {
+    const next = options.properties.find(
+      (candidate) => candidate.id === propertyId,
+    );
+    if (!next) {
+      set("propertyId", "");
+      return;
+    }
+    setDraft((current) => ({
+      ...emptyFields(next),
+      channel: current.channel,
+      format: current.format,
+    }));
+    setHashtagText(next.defaults.hashtags.join(" "));
+  }
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    if (terminal || !canWrite) return;
+    setSaving(true);
+    setError(null);
+    const hashtags = [
+      ...new Set(
+        hashtagText
+          .split(/[\s,]+/u)
+          .map((value) => value.trim())
+          .filter(Boolean)
+          .map((value) => (value.startsWith("#") ? value : `#${value}`)),
+      ),
+    ];
+    try {
+      const payload = { ...draft, hashtags };
+      if (item) await updatePublication(organizationId, item.id, payload);
+      else await createPublication(organizationId, payload);
+      onSaved();
+    } catch (saveError) {
+      setError(
+        saveError instanceof AppApiError
+          ? saveError.message
+          : "Não foi possível salvar a publicação.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <div className="app-modal-backdrop" role="presentation">
+      <section
+        className="app-modal app-publication-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={item ? "Editar publicação" : "Nova publicação"}
+      >
+        <header>
+          <div>
+            <span className="app-section-eyebrow">Portfólio · Publicações</span>
+            <h2>{item ? "Editar publicação" : "Nova publicação"}</h2>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Fechar">
+            ×
+          </button>
+        </header>
+        <form onSubmit={(event) => void save(event)}>
+          {error && <div className="app-inline-error">{error}</div>}
+          <div className="app-form-grid">
+            <label className="is-wide">
+              <span>Imóvel *</span>
+              <select
+                value={draft.propertyId}
+                disabled={Boolean(item) || terminal}
+                onChange={(event) => chooseProperty(event.target.value)}
+              >
+                <option value="">Selecione um imóvel</option>
+                {options.properties.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.internalCode} · {option.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {property && (
+              <div
+                className={`app-publication-readiness is-wide ${property.readiness.ready ? "is-ready" : "is-blocked"}`}
+              >
+                <strong>
+                  {property.readiness.ready
+                    ? "Imóvel apto para avançar"
+                    : `${property.readiness.blockers.length} pendência(s) bloqueiam aprovação/agendamento`}
+                </strong>
+                {property.readiness.blockers.map((issue) => (
+                  <span key={issue.code}>• {issue.label}</span>
+                ))}
+                {property.readiness.warnings.map((issue) => (
+                  <span className="is-warning" key={issue.code}>
+                    • {issue.label}
+                  </span>
+                ))}
+              </div>
+            )}
+            <label>
+              <span>Objetivo *</span>
+              <select
+                value={draft.objective}
+                disabled={terminal}
+                onChange={(event) =>
+                  set(
+                    "objective",
+                    event.target.value as PortfolioPublicationObjective,
+                  )
+                }
+              >
+                {Object.entries(objectiveLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Canal *</span>
+              <select
+                value={draft.channel}
+                disabled={terminal}
+                onChange={(event) =>
+                  set(
+                    "channel",
+                    event.target.value as PortfolioPublicationChannel,
+                  )
+                }
+              >
+                {Object.entries(channelLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Formato *</span>
+              <select
+                value={draft.format}
+                disabled={terminal}
+                onChange={(event) =>
+                  set(
+                    "format",
+                    event.target.value as PortfolioPublicationFormat,
+                  )
+                }
+              >
+                {Object.entries(formatLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Status *</span>
+              <select
+                value={draft.status}
+                disabled={terminal}
+                onChange={(event) =>
+                  set(
+                    "status",
+                    event.target.value as PortfolioPublicationStatus,
+                  )
+                }
+              >
+                {allowedStatuses.map((value) => (
+                  <option key={value} value={value}>
+                    {value === "published"
+                      ? "Publicada (registro manual)"
+                      : statusLabels[value]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="is-wide">
+              <span>Título *</span>
+              <input
+                value={draft.title}
+                disabled={terminal}
+                onChange={(event) => set("title", event.target.value)}
+              />
+            </label>
+            <label className="is-wide">
+              <span>Legenda *</span>
+              <textarea
+                rows={7}
+                value={draft.caption}
+                disabled={terminal}
+                onChange={(event) => set("caption", event.target.value)}
+              />
+            </label>
+            <label>
+              <span>CTA</span>
+              <input
+                value={draft.cta ?? ""}
+                disabled={terminal}
+                onChange={(event) => set("cta", event.target.value || null)}
+                placeholder="Ex.: Agende uma visita"
+              />
+            </label>
+            <label>
+              <span>Hashtags</span>
+              <input
+                value={hashtagText}
+                disabled={terminal}
+                onChange={(event) => setHashtagText(event.target.value)}
+                placeholder="#Imoveis #Venda"
+              />
+            </label>
+            <label>
+              <span>Campanha</span>
+              <input
+                value={draft.campaignName ?? ""}
+                disabled={terminal}
+                onChange={(event) =>
+                  set("campaignName", event.target.value || null)
+                }
+              />
+            </label>
+            <label>
+              <span>Link de rastreamento</span>
+              <input
+                type="url"
+                value={draft.trackingLink ?? ""}
+                disabled={terminal}
+                onChange={(event) =>
+                  set("trackingLink", event.target.value || null)
+                }
+                placeholder="https://..."
+              />
+            </label>
+            {(draft.status === "scheduled" || draft.scheduledAt) && (
+              <label className="is-wide">
+                <span>Agendar para *</span>
+                <input
+                  type="datetime-local"
+                  value={toLocalInput(draft.scheduledAt)}
+                  disabled={terminal}
+                  onChange={(event) =>
+                    set("scheduledAt", fromLocalInput(event.target.value))
+                  }
+                />
+              </label>
+            )}
+          </div>
+          {requiresReadiness && property && !property.readiness.ready && (
+            <p className="app-publication-block-note">
+              Salve como rascunho ou corrija as pendências do imóvel antes de
+              avançar este status.
+            </p>
+          )}
+          {terminal && (
+            <p className="app-publication-block-note">
+              Este registro está finalizado e permanece imutável para preservar
+              o histórico. Crie uma nova publicação para uma nova divulgação.
+            </p>
+          )}
+          <footer>
+            <button
+              type="button"
+              className="app-secondary-button"
+              onClick={onClose}
+            >
+              Fechar
+            </button>
+            {!terminal && canWrite && (
+              <button
+                type="submit"
+                className="app-primary-button"
+                disabled={
+                  saving ||
+                  !draft.propertyId ||
+                  !draft.title.trim() ||
+                  !draft.caption.trim() ||
+                  (requiresReadiness && !property?.readiness.ready) ||
+                  (draft.status === "scheduled" && !draft.scheduledAt)
+                }
+              >
+                {saving
+                  ? "Salvando..."
+                  : item
+                    ? "Salvar publicação"
+                    : "Criar publicação"}
+              </button>
+            )}
+          </footer>
+        </form>
+      </section>
+    </div>
+  );
+}
+export function PublicationsPage({
+  organizationId,
+  canCreate,
+  canUpdate,
+}: Props) {
+  const initialPropertyId =
+    new URLSearchParams(globalThis.location.search).get("propertyId")?.trim() ||
+    "";
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<PortfolioPublicationStatus | "">("");
+  const [channel, setChannel] = useState<PortfolioPublicationChannel | "">("");
+  const [page, setPage] = useState(1);
+  const [result, setResult] = useState<PublicationListResult | null>(null);
+  const [options, setOptions] = useState<PublicationOptions | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [modalItem, setModalItem] = useState<
+    PublicationListItem | "new" | null
+  >(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const query = useMemo(
+    () => ({
+      search: search.trim() || undefined,
+      status: status || undefined,
+      channel: channel || undefined,
+      propertyId: initialPropertyId || undefined,
+      page,
+      pageSize: 50,
+    }),
+    [search, status, channel, initialPropertyId, page],
+  );
+  const load = () => {
+    setLoading(true);
+    setError(null);
+    void Promise.all([
+      listPublications(organizationId, query),
+      getPublicationOptions(organizationId),
+    ])
+      .then(([list, publicationOptions]) => {
+        setResult(list);
+        setOptions(publicationOptions);
+      })
+      .catch((loadError) =>
+        setError(
+          loadError instanceof AppApiError
+            ? loadError.message
+            : "Não foi possível carregar publicações.",
+        ),
+      )
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => {
+    const handle = globalThis.setTimeout(load, 220);
+    return () => globalThis.clearTimeout(handle);
+  }, [organizationId, query]);
+  const readiness = useMemo(() => {
+    const properties = options?.properties ?? [];
+    return {
+      ready: properties.filter((property) => property.readiness.ready).length,
+      blocked: properties.filter((property) => !property.readiness.ready)
+        .length,
+      warnings: properties.filter(
+        (property) => property.readiness.warnings.length > 0,
+      ).length,
+    };
+  }, [options]);
+  const itemForModal = modalItem && modalItem !== "new" ? modalItem : null;
+  async function removePublication(item: PublicationListItem) {
+    if (
+      item.status === "published" ||
+      item.status === "canceled" ||
+      !globalThis.confirm(
+        `Excluir a publicação "${item.title}"? Ela será cancelada e o histórico será preservado.`,
+      )
+    )
+      return;
+    setRemovingId(item.id);
+    setError(null);
+    try {
+      await updatePublication(organizationId, item.id, {
+        propertyId: item.propertyId,
+        objective: item.objective,
+        channel: item.channel,
+        format: item.format,
+        status: "canceled",
+        title: item.title,
+        caption: item.caption,
+        cta: item.cta,
+        hashtags: item.hashtags,
+        campaignName: item.campaignName,
+        trackingLink: item.trackingLink,
+        scheduledAt: null,
+      });
+      load();
+    } catch (removeError) {
+      setError(
+        removeError instanceof AppApiError
+          ? removeError.message
+          : "Não foi possível excluir a publicação.",
+      );
+    } finally {
+      setRemovingId(null);
+    }
+  }
+  return (
+    <>
+      <section className="app-page-heading">
+        <div>
+          <span className="app-section-eyebrow">Portfólio</span>
+          <h1>Publicações</h1>
+          <p>
+            Planeje conteúdo, valide a prontidão do imóvel, aprove, agende e
+            preserve o histórico de divulgação.
+          </p>
+        </div>
+        {canCreate && (
+          <button
+            className="app-primary-button"
+            type="button"
+            onClick={() => setModalItem("new")}
+          >
+            + Nova publicação
+          </button>
+        )}
+      </section>
+      <div className="app-publication-provider-banner">
+        <ShareIcon />
+        <div>
+          <strong>
+            Núcleo de publicação ativo — integrações externas entram depois
+          </strong>
+          <p>
+            Este ciclo controla conteúdo, canal, formato, aprovação, agendamento
+            e registro manual. Nenhuma publicação é enviada automaticamente para
+            Meta ou outros provedores.
+          </p>
+        </div>
+      </div>
+      {error && <div className="app-inline-error">{error}</div>}
+      <section className="app-metrics app-metrics--compact">
+        {[
+          ["Imóveis no marketing", result?.propertiesInMarketing ?? 0],
+          ["Rascunhos", result?.drafts ?? 0],
+          ["Agendadas", result?.scheduled ?? 0],
+          ["Publicadas 30 dias", result?.publishedLast30Days ?? 0],
+          ["Com erro", result?.failed ?? 0],
+        ].map(([label, value]) => (
+          <article className="app-metric-card" key={String(label)}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+          </article>
+        ))}
+      </section>
+      <section className="app-publication-readiness-summary">
+        <article>
+          <strong>{readiness.ready}</strong>
+          <span>imóveis aptos para avançar</span>
+        </article>
+        <article>
+          <strong>{readiness.blocked}</strong>
+          <span>com pendências bloqueantes</span>
+        </article>
+        <article>
+          <strong>{readiness.warnings}</strong>
+          <span>com alertas não bloqueantes</span>
+        </article>
+        <p>
+          A ausência de autorização vigente gera alerta neste ciclo, não
+          bloqueio automático. A política poderá ser configurável por
+          organização depois.
+        </p>
+      </section>
+      <section className="app-filter-panel app-publication-filters">
+        <div className="app-search-field">
+          <SearchIcon />
+          <input
+            placeholder="Publicação, imóvel, código ou campanha..."
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(1);
+            }}
+          />
+        </div>
+        <select
+          aria-label="Status"
+          value={status}
+          onChange={(event) => {
+            setStatus(event.target.value as PortfolioPublicationStatus | "");
+            setPage(1);
+          }}
+        >
+          <option value="">Todos os status</option>
+          {Object.entries(statusLabels).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Canal"
+          value={channel}
+          onChange={(event) => {
+            setChannel(event.target.value as PortfolioPublicationChannel | "");
+            setPage(1);
+          }}
+        >
+          <option value="">Todos os canais</option>
+          {Object.entries(channelLabels).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+        {(search || status || channel) && (
+          <button
+            type="button"
+            className="app-secondary-button"
+            onClick={() => {
+              setSearch("");
+              setStatus("");
+              setChannel("");
+              setPage(1);
+            }}
+          >
+            Limpar
+          </button>
+        )}
+      </section>
+      <section className="app-data-card">
+        {loading ? (
+          <div className="app-table-empty">
+            <span className="app-spinner" />
+            Carregando publicações...
+          </div>
+        ) : !result?.items.length ? (
+          <div className="app-table-empty">
+            <ShareIcon />
+            <h2>Nenhuma publicação registrada</h2>
+            <p>
+              Crie um rascunho a partir de um imóvel. Pendências podem ser
+              corrigidas antes da aprovação ou do agendamento.
+            </p>
+            {canCreate && (
+              <button
+                className="app-primary-button"
+                type="button"
+                onClick={() => setModalItem("new")}
+              >
+                Criar primeira publicação
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="app-publication-table app-action-table">
+              <header>
+                <span>Publicação</span>
+                <span>Imóvel</span>
+                <span>Canal / formato</span>
+                <span>Status</span>
+                <span>Agendamento</span>
+                <span>Prontidão</span>
+              </header>
+              {result.items.map((item) => (
+                <div
+                  className="app-action-table-row"
+                  key={item.id}
+                >
+                  <span>
+                    <strong>{item.title}</strong>
+                    <small>
+                      {item.campaignName || objectiveLabels[item.objective]}
+                    </small>
+                  </span>
+                  <span>
+                    <strong>{item.property.title}</strong>
+                    <small>{item.property.internalCode}</small>
+                  </span>
+                  <span>
+                    {channelLabels[item.channel]}
+                    <small>{formatLabels[item.format]}</small>
+                  </span>
+                  <span>
+                    <em
+                      className={`app-status-pill publication-${item.status}`}
+                    >
+                      {statusLabels[item.status]}
+                    </em>
+                  </span>
+                  <span>
+                    {item.status === "published"
+                      ? dateTimeLabel(item.publishedAt)
+                      : dateTimeLabel(item.scheduledAt)}
+                  </span>
+                  <span
+                    className={item.readiness.ready ? "is-ready" : "is-blocked"}
+                  >
+                    {item.readiness.ready
+                      ? "Apto"
+                      : `${item.readiness.blockers.length} pendência(s)`}
+                    {item.readiness.warnings.length > 0 && (
+                      <small>{item.readiness.warnings.length} alerta(s)</small>
+                    )}
+                  </span>
+                  <span className="app-row-actions">
+                    {canUpdate && <button className="app-secondary-button" type="button" onClick={() => setModalItem(item)}>Editar</button>}
+                    {canUpdate && item.status !== "published" && item.status !== "canceled" && <button className="app-secondary-button is-danger" type="button" disabled={removingId === item.id} onClick={() => void removePublication(item)}>{removingId === item.id ? "Excluindo..." : "Excluir"}</button>}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="app-pagination">
+              <span>
+                {result.totalItems}{" "}
+                {result.totalItems === 1 ? "publicação" : "publicações"}
+              </span>
+              <div>
+                <button
+                  type="button"
+                  disabled={result.page <= 1}
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                >
+                  Anterior
+                </button>
+                <span>
+                  {result.page} / {result.totalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={result.page >= result.totalPages}
+                  onClick={() => setPage((current) => current + 1)}
+                >
+                  Próxima
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </section>
+      {modalItem && options && (
+        <PublicationModal
+          organizationId={organizationId}
+          options={options}
+          item={itemForModal}
+          initialPropertyId={initialPropertyId}
+          canWrite={modalItem === "new" ? canCreate : canUpdate}
+          onClose={() => setModalItem(null)}
+          onSaved={() => {
+            setModalItem(null);
+            load();
+          }}
+        />
+      )}
+    </>
+  );
 }
