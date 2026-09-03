@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getPublicLandingPage, submitPublicLandingLead } from "../services/landingPagesApi";
+import { getPublicLandingPage, submitPublicLandingLead, trackPublicLandingPropertyView } from "../services/landingPagesApi";
 import type { LandingPageDocument } from "./model";
 import { LandingPageRenderer } from "./LandingPageRenderer";
 
@@ -55,5 +55,5 @@ export function PublicLandingApp() {
 
   if (error) return <main className="lp-public-state"><h1>Página indisponível</h1><p>{error}</p></main>;
   if (!page) return <main className="lp-public-state"><span>Carregando...</span></main>;
-  return <><LandingPageRenderer page={page} onSubmit={async (data) => { if (!preview) await submitPublicLandingLead(slug, data); setSent(true); }}/>{sent && <div className="lp-toast" role="status">{successMessage(page)}</div>}</>;
+  return <><LandingPageRenderer page={page} onPropertyView={(propertyId)=>preview?undefined:trackPublicLandingPropertyView(slug,propertyId)} onSubmit={async (data) => { if (!preview) await submitPublicLandingLead(slug, data); setSent(true); }}/>{sent && <div className="lp-toast" role="status">{successMessage(page)}</div>}</>;
 }
