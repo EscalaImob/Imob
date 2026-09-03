@@ -22,11 +22,27 @@ const themeFields: Array<[keyof LandingTheme, string]> = [["primaryColor", "Cor 
 const localPreviewMode = import.meta.env.DEV && import.meta.env.VITE_LANDING_PAGES_PREVIEW_MODE === "true";
 
 function withNavigation(page: LandingPageDocument): LandingPageDocument {
-  if (page.sections.some((section) => section.type === "navigation")) return page;
-  const hero = page.sections.find((section) => section.type === "hero");
-  const content = hero?.content ?? {};
-  const navigation: LandingSection = { id: crypto.randomUUID(), type: "navigation", order: 0, visible: true, settings: {}, content: { propertiesLabel: content.navPropertiesLabel || "Imóveis", propertiesLink: "#imoveis", advertiseLabel: "Anunciar", advertiseLink: "#contato", aboutLabel: content.navAboutLabel || "Sobre mim", aboutLink: "#sobre", favoriteLabel: "Favoritos" } };
-  return { ...page, sections: [navigation, ...page.sections.map((section, index) => ({ ...section, order: index + 1 }))] };
+  let sections = page.sections;
+  if (!sections.some((section) => section.type === "navigation")) {
+    const hero = sections.find((section) => section.type === "hero");
+    const content = hero?.content ?? {};
+    const navigation: LandingSection = { id: crypto.randomUUID(), type: "navigation", order: 0, visible: true, settings: {}, content: { propertiesLabel: content.navPropertiesLabel || "Imóveis", propertiesLink: "#imoveis", advertiseLabel: "Anunciar", advertiseLink: "#contato", aboutLabel: content.navAboutLabel || "Sobre mim", aboutLink: "#sobre", favoriteLabel: "Favoritos" } };
+    sections = [navigation, ...sections.map((section, index) => ({ ...section, order: index + 1 }))];
+  }
+  const defaultContent = new Map(classicTemplate.createSections().map((section) => [section.type, section.content]));
+  sections = sections.map((section) => {
+    const enriched = { ...section, content: { ...(defaultContent.get(section.type) || {}), ...section.content } };
+    if (section.type !== "featured-properties") return enriched;
+    const current = Array.isArray(section.content.images) ? section.content.images : [];
+    const images = Array.from({ length: 9 }, (_, index) => {
+      const item = current[index];
+      if (!item || typeof item !== "object" || Array.isArray(item)) return { imageUrl: "", imageStorageKey: "" };
+      const record = item as Record<string, unknown>;
+      return { imageUrl: typeof record.imageUrl === "string" ? record.imageUrl : "", imageStorageKey: typeof record.imageStorageKey === "string" ? record.imageStorageKey : "" };
+    });
+    return { ...enriched, content: { ...enriched.content, images } };
+  });
+  return { ...page, sections };
 }
 
 function createLocalPreview(): LandingPageDocument {
@@ -36,7 +52,7 @@ function createLocalPreview(): LandingPageDocument {
 
 const contentLabels: Record<string, string> = { title: "Título", eyebrow: "Subtítulo", description: "Descrição", buttonLabel: "Texto do botão", buttonLink: "Destino do botão", imageUrl: "Imagem (URL)", navPropertiesLabel: "Menu: imóveis", navAboutLabel: "Menu: sobre", navContactLabel: "Menu: contato", propertiesStatLabel: "Indicador: imóveis", credentialStatLabel: "Indicador: credenciamento", locationStatLabel: "Indicador: localização", nameLabel: "Formulário: nome", whatsappLabel: "Formulário: WhatsApp", emailLabel: "Formulário: e-mail", interestLabel: "Formulário: interesse", buyerOptionLabel: "Opção: comprar ou alugar", captureOptionLabel: "Opção: anunciar imóvel", messageLabel: "Formulário: mensagem", successMessage: "Mensagem de sucesso", copyrightText: "Texto de direitos autorais" };
 const identityFields: Array<[keyof LandingPageDocument["identity"], string]> = [["name", "Nome público"], ["description", "Apresentação"], ["logoUrl", "Logo (URL)"], ["email", "E-mail"], ["phone", "Telefone"], ["whatsapp", "WhatsApp"], ["instagramUrl", "Instagram (URL)"], ["creci", "CRECI"], ["address", "Localização/endereço"]];
-Object.assign(contentLabels,{propertiesLabel:"Menu: imóveis",propertiesLink:"Link: imóveis",advertiseLabel:"Menu: anunciar",advertiseLink:"Link: anunciar",aboutLabel:"Menu: sobre mim",aboutLink:"Link: sobre mim",favoriteLabel:"Acessibilidade: favoritos",marketYearsValue:"Indicador: experiência",marketYearsLabel:"Legenda: experiência"});
+Object.assign(contentLabels,{propertiesLabel:"Menu: imóveis",propertiesLink:"Link: imóveis",advertiseLabel:"Menu: anunciar",advertiseLink:"Link: anunciar",aboutLabel:"Menu: sobre mim",aboutLink:"Link: sobre mim",favoriteLabel:"Acessibilidade: favoritos",marketYearsValue:"Indicador: experiência",marketYearsLabel:"Legenda: experiência",images:"Imagens dos nove destaques",officeLabel:"Contato: escritório",whatsappInfoLabel:"Contato: WhatsApp",emailInfoLabel:"Contato: e-mail",websiteLabel:"Contato: website",websiteValue:"Website",creciLabel:"Contato: CRECI",navigationTitle:"Rodapé: título da navegação",navigationItems:"Links de navegação",regionsTitle:"Rodapé: título das regiões",regionItems:"Links de regiões",instagramUrl:"Instagram (URL)",tiktokUrl:"TikTok (URL)",youtubeUrl:"YouTube (URL)",privacyLabel:"Texto da política de privacidade",privacyLink:"Link da política de privacidade",developerLabel:"Crédito de desenvolvimento"});
 
 function editorControl(key: string, value: string, onChange: (value: string) => void) {
   const multiline = key === "description" || key === "successMessage";
