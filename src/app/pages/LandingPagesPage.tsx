@@ -1,0 +1,92 @@
+import { useEffect, useMemo, useState } from "react";
+import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import type { LandingPageDocument, LandingSection, LandingTheme } from "../../landing-pages/model";
+import { sectionLabels } from "../../landing-pages/model";
+import { LandingPageRenderer } from "../../landing-pages/LandingPageRenderer";
+import { classicTemplate } from "../../landing-pages/templateRegistry";
+import { createLandingPage, getLandingPage, listLandingPages, setLandingPageStatus, updateLandingPage, type LandingPageSummary } from "../../services/landingPagesApi";
+import { AppApiError } from "../../services/appApi";
+import { getOrganizationIdentity } from "../../services/organizationSettingsApi";
+
+type EditorPanel = "sections" | "preview" | "settings";
+
+function SortableSection({ section, selected, onSelect, onToggle }: { section: LandingSection; selected: boolean; onSelect: () => void; onToggle: () => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: section.id });
+  return <div ref={setNodeRef} className={`lp-editor-section ${selected ? "is-selected" : ""} ${isDragging ? "is-dragging" : ""}`} style={{ transform: CSS.Transform.toString(transform), transition }}><button type="button" className="lp-editor-drag" aria-label={`Reordenar ${sectionLabels[section.type]}`} {...attributes} {...listeners}>⋮⋮</button><button type="button" onClick={onSelect}><strong>{sectionLabels[section.type]}</strong><small>{section.visible ? "Visível" : "Oculta"}</small></button><button type="button" aria-label={`${section.visible ? "Ocultar" : "Mostrar"} seção`} onClick={onToggle}>{section.visible ? "◉" : "○"}</button></div>;
+}
+
+function publicUrl(slug: string) { return `${location.origin}/imob/${slug}`; }
+const themeFields: Array<[keyof LandingTheme, string]> = [["primaryColor", "Cor principal"], ["secondaryColor", "Cor secundária"], ["backgroundColor", "Fundo"], ["surfaceColor", "Superfícies"], ["textColor", "Texto"], ["mutedTextColor", "Texto de apoio"], ["buttonTextColor", "Texto dos botões"], ["borderColor", "Bordas"]];
+const localPreviewMode = import.meta.env.DEV && import.meta.env.VITE_LANDING_PAGES_PREVIEW_MODE === "true";
+
+function createLocalPreview(): LandingPageDocument {
+  const now = new Date().toISOString();
+  return { id: `local-${crypto.randomUUID()}`, name: "Minha Landing Page", slug: "minha-landing-page-preview", templateId: classicTemplate.id, templateVersion: classicTemplate.version, schemaVersion: 1, status: "draft", theme: { ...classicTemplate.defaultTheme }, seo: { title: "Minha Landing Page", description: "Uma vitrine profissional de imóveis.", openGraphTitle: "", openGraphDescription: "", openGraphImage: null }, identity: { name: "Sua Imobiliária", description: "Atendimento imobiliário profissional, próximo e transparente.", logoUrl: null, email: "contato@imobiliaria.com.br", phone: "(00) 0000-0000", whatsapp: "(00) 00000-0000", instagramUrl: null, creci: "CRECI 00000-F", address: "Sua cidade e região" }, sections: classicTemplate.createSections(), properties: [], publishedAt: null, updatedAt: now };
+}
+
+const contentLabels: Record<string, string> = { title: "Título", eyebrow: "Subtítulo", description: "Descrição", buttonLabel: "Texto do botão", buttonLink: "Destino do botão", imageUrl: "Imagem (URL)", navPropertiesLabel: "Menu: imóveis", navAboutLabel: "Menu: sobre", navContactLabel: "Menu: contato", propertiesStatLabel: "Indicador: imóveis", credentialStatLabel: "Indicador: credenciamento", locationStatLabel: "Indicador: localização", nameLabel: "Formulário: nome", whatsappLabel: "Formulário: WhatsApp", emailLabel: "Formulário: e-mail", interestLabel: "Formulário: interesse", buyerOptionLabel: "Opção: comprar ou alugar", captureOptionLabel: "Opção: anunciar imóvel", messageLabel: "Formulário: mensagem", successMessage: "Mensagem de sucesso", copyrightText: "Texto de direitos autorais" };
+const identityFields: Array<[keyof LandingPageDocument["identity"], string]> = [["name", "Nome público"], ["description", "Apresentação"], ["logoUrl", "Logo (URL)"], ["email", "E-mail"], ["phone", "Telefone"], ["whatsapp", "WhatsApp"], ["instagramUrl", "Instagram (URL)"], ["creci", "CRECI"], ["address", "Localização/endereço"]];
+
+function editorControl(key: string, value: string, onChange: (value: string) => void) {
+  const multiline = key === "description" || key === "successMessage";
+  return <label key={key}>{contentLabels[key] || key}{multiline ? <textarea rows={4} value={value} onChange={(event) => onChange(event.target.value)} /> : <input value={value} onChange={(event) => onChange(event.target.value)} />}</label>;
+}
+
+function ContentFields({ content, onChange }: { content: Record<string, unknown>; onChange: (content: Record<string, unknown>) => void }) {
+  return <>{Object.entries(content).map(([key, value]) => {
+    if (typeof value === "string") return editorControl(key, value, (next) => onChange({ ...content, [key]: next }));
+    if (!Array.isArray(value)) return null;
+    return <fieldset className="lp-editor-fieldset" key={key}><legend>{contentLabels[key] || "Itens"}</legend>{value.map((item, index) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+      const record = item as Record<string, unknown>;
+      return <div className="lp-editor-nested" key={index}><strong>Item {index + 1}</strong>{Object.entries(record).map(([itemKey, itemValue]) => typeof itemValue === "string" ? editorControl(itemKey, itemValue, (next) => { const items = [...value]; items[index] = { ...record, [itemKey]: next }; onChange({ ...content, [key]: items }); }) : null)}</div>;
+    })}</fieldset>;
+  })}</>;
+}
+
+export function LandingPagesPage({ organizationId, canManage }: { organizationId: string; canManage: boolean }) {
+  const [list, setList] = useState<LandingPageSummary[]>([]);
+  const [page, setPage] = useState<LandingPageDocument | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [viewport, setViewport] = useState<"desktop" | "tablet" | "mobile">("desktop");
+  const [editorPanel, setEditorPanel] = useState<EditorPanel>("preview");
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
+
+  useEffect(() => {
+    if (localPreviewMode) { setLoading(false); return; }
+    let active = true;
+    setLoading(true);
+    void listLandingPages(organizationId).then((items) => { if (active) { setList(items); if (items[0]) void open(items[0].id); } }).catch((cause) => active && setError(cause instanceof AppApiError ? cause.message : "Não foi possível carregar as landing pages.")).finally(() => active && setLoading(false));
+    return () => { active = false; };
+  }, [organizationId]);
+
+  async function open(id: string) { setBusy(true); setError(""); try { const value = await getLandingPage(organizationId, id); setPage(value); setSelectedId(value.sections[0]?.id || null); } catch (cause) { setError(cause instanceof AppApiError ? cause.message : "Não foi possível abrir a página."); } finally { setBusy(false); } }
+  async function create() { setBusy(true); setError(""); try { if (localPreviewMode) { const value = createLocalPreview(); setPage(value); setSelectedId(value.sections[0]?.id || null); setMessage("Prévia local criada — nada será salvo"); return; } const identity = await getOrganizationIdentity(organizationId); const value = await createLandingPage(organizationId, { name: identity.brandName || identity.organizationName, templateId: classicTemplate.id }); setList((current) => [{ id: value.id, name: value.name, slug: value.slug, status: value.status, templateId: value.templateId, updatedAt: value.updatedAt, publishedAt: value.publishedAt }, ...current]); setPage(value); setSelectedId(value.sections[0]?.id || null); } catch (cause) { setError(cause instanceof AppApiError ? cause.message : "Não foi possível criar a landing page."); } finally { setBusy(false); } }
+  function updateSection(id: string, recipe: (section: LandingSection) => LandingSection) { setPage((current) => current ? { ...current, sections: current.sections.map((section) => section.id === id ? recipe(section) : section) } : current); }
+  function dragEnd(event: DragEndEvent) { if (!page || event.over === null || event.active.id === event.over.id) return; const oldIndex = page.sections.findIndex((section) => section.id === event.active.id); const newIndex = page.sections.findIndex((section) => section.id === event.over!.id); setPage({ ...page, sections: arrayMove(page.sections, oldIndex, newIndex).map((section, order) => ({ ...section, order })) }); }
+  async function save() { if (!page) return; if (localPreviewMode) { setMessage("Alterações aplicadas somente nesta prévia local"); return; } setBusy(true); setMessage("Salvando..."); try { const value = await updateLandingPage(organizationId, page.id, { name: page.name, theme: page.theme, seo: page.seo, sections: page.sections, propertyIds: page.properties.map((property) => property.id) }); setPage(value); setMessage("Alterações salvas"); } catch (cause) { setMessage(""); setError(cause instanceof AppApiError ? cause.message : "Não foi possível salvar."); } finally { setBusy(false); } }
+  async function publish() { if (!page) return; if (localPreviewMode) { const status = page.status === "published" ? "draft" : "published"; setPage({ ...page, status, publishedAt: status === "published" ? new Date().toISOString() : null }); setMessage(status === "published" ? "Publicação simulada localmente" : "Prévia voltou para rascunho"); return; } setBusy(true); try { const value = await setLandingPageStatus(organizationId, page.id, page.status === "published" ? "unpublished" : "published"); setPage(value); setMessage(value.status === "published" ? "Página publicada" : "Página despublicada"); } catch (cause) { setError(cause instanceof AppApiError ? cause.message : "Não foi possível alterar a publicação."); } finally { setBusy(false); } }
+  async function copy() { if (!page) return; await navigator.clipboard.writeText(publicUrl(page.slug)); setMessage("Link copiado"); }
+  function openPreview() { if (!page) return; const key = crypto.randomUUID(); localStorage.setItem(`imob:landing-preview:${key}`, JSON.stringify({ createdAt: Date.now(), page })); const previewWindow = window.open(`/imob/preview/?previewKey=${encodeURIComponent(key)}`, "_blank"); if (previewWindow) previewWindow.opener = null; else setError("O navegador bloqueou a nova guia. Libere pop-ups para visualizar a landing page."); }
+
+  const selected = useMemo(() => page?.sections.find((section) => section.id === selectedId) || null, [page, selectedId]);
+  if (loading) return <section className="app-data-card lp-editor-state">Carregando landing pages...</section>;
+  if (!page) return <section className="app-page lp-manager-empty"><div><small>MARKETING & SITE</small><h1>Landing Pages</h1><p>{localPreviewMode ? "Modo de prévia local: crie e edite livremente. Nada será enviado para a API ou salvo no banco." : "Crie uma vitrine pública profissional, conectada ao seu catálogo e aos Leads do Site."}</p>{error && <div className="app-inline-error">{error}</div>}<button type="button" className="app-primary-button" disabled={(!canManage && !localPreviewMode) || busy} onClick={() => void create()}>+ Criar Landing Page</button></div>{list.length > 0 && <div>{list.map((item) => <button key={item.id} onClick={() => void open(item.id)}>{item.name}</button>)}</div>}</section>;
+
+  return <section className={`lp-editor is-mobile-${editorPanel}`}>
+    <header className="lp-editor-top"><div><small>{localPreviewMode ? "LANDING PAGE BUILDER · PRÉVIA LOCAL" : "LANDING PAGE BUILDER"}</small><input aria-label="Nome da landing page" value={page.name} disabled={!canManage && !localPreviewMode} onChange={(event) => setPage({ ...page, name: event.target.value })} /><span className={`lp-status lp-status--${page.status}`}>{page.status === "published" ? "Publicada" : page.status === "draft" ? "Rascunho" : "Despublicada"}</span></div><div>{message && <span role="status">{message}</span>}<button type="button" className="app-secondary-button" onClick={openPreview}>Ver em nova guia</button>{!localPreviewMode && <><button type="button" className="app-secondary-button" onClick={() => void copy()}>Copiar link</button><a className="app-secondary-button" href={publicUrl(page.slug)} target="_blank" rel="noreferrer">Abrir página publicada</a></>}{(canManage || localPreviewMode) && <><button type="button" className="app-secondary-button" disabled={busy} onClick={() => void publish()}>{page.status === "published" ? "Voltar para rascunho" : localPreviewMode ? "Simular publicação" : "Publicar"}</button><button type="button" className="app-primary-button" disabled={busy} onClick={() => void save()}>{localPreviewMode ? "Aplicar na prévia" : "Salvar"}</button></>}</div></header>
+    {error && <div className="app-inline-error">{error}</div>}
+    <div className="lp-editor-mobile-tabs" role="tablist" aria-label="Painéis do editor"><button type="button" className={editorPanel === "sections" ? "is-active" : ""} onClick={() => setEditorPanel("sections")}>Seções</button><button type="button" className={editorPanel === "preview" ? "is-active" : ""} onClick={() => setEditorPanel("preview")}>Preview</button><button type="button" className={editorPanel === "settings" ? "is-active" : ""} onClick={() => setEditorPanel("settings")}>Editar</button></div>
+    <div className="lp-editor-layout">
+      <aside><h2>Seções</h2><p>Arraste para reorganizar.</p><DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={dragEnd}><SortableContext items={page.sections.map((section) => section.id)} strategy={verticalListSortingStrategy}>{page.sections.map((section) => <SortableSection key={section.id} section={section} selected={section.id === selectedId} onSelect={() => { setSelectedId(section.id); setEditorPanel("settings"); }} onToggle={() => updateSection(section.id, (current) => ({ ...current, visible: !current.visible }))} />)}</SortableContext></DndContext></aside>
+      <div className="lp-editor-center"><div className="lp-editor-viewport"><button className={viewport === "desktop" ? "is-active" : ""} onClick={() => setViewport("desktop")}>Desktop</button><button className={viewport === "tablet" ? "is-active" : ""} onClick={() => setViewport("tablet")}>Tablet</button><button className={viewport === "mobile" ? "is-active" : ""} onClick={() => setViewport("mobile")}>Mobile</button></div><div className={`lp-editor-preview is-${viewport}`}><LandingPageRenderer page={page} preview /></div></div>
+      <aside className="lp-editor-settings"><h2>{selected ? sectionLabels[selected.type] : "Aparência"}</h2>{selected && <ContentFields content={selected.content} onChange={(content) => updateSection(selected.id, (section) => ({ ...section, content }))} />}<details><summary>Identidade e contato</summary>{identityFields.map(([key, label]) => <label key={key}>{label}{key === "description" ? <textarea rows={4} value={page.identity[key] || ""} onChange={(event) => setPage({ ...page, identity: { ...page.identity, [key]: event.target.value || null } })} /> : <input value={page.identity[key] || ""} onChange={(event) => setPage({ ...page, identity: { ...page.identity, [key]: event.target.value || null } })} />}</label>)}</details><details open><summary>Cores da página</summary>{themeFields.map(([key, label]) => <label key={key}>{label}<span className="lp-color"><input type="color" value={page.theme[key]} onChange={(event) => setPage({ ...page, theme: { ...page.theme, [key]: event.target.value } })} /><input value={page.theme[key]} maxLength={7} onChange={(event) => setPage({ ...page, theme: { ...page.theme, [key]: event.target.value } })} /></span></label>)}</details><details><summary>SEO</summary><label>Título da página<input value={page.seo.title} onChange={(event) => setPage({ ...page, seo: { ...page.seo, title: event.target.value } })} /></label><label>Descrição para busca<textarea value={page.seo.description} onChange={(event) => setPage({ ...page, seo: { ...page.seo, description: event.target.value } })} /></label></details></aside>
+    </div>
+  </section>;
+}

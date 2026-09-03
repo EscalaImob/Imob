@@ -1,0 +1,12 @@
+export type LandingSectionType = "hero" | "featured-properties" | "about" | "services" | "regions" | "contact" | "footer" | "custom";
+export type LandingStatus = "draft" | "published" | "unpublished";
+export interface LandingTheme { primaryColor: string; secondaryColor: string; backgroundColor: string; surfaceColor: string; textColor: string; mutedTextColor: string; buttonTextColor: string; borderColor: string; }
+export interface LandingSeo { title: string; description: string; openGraphTitle: string; openGraphDescription: string; openGraphImage: string | null; }
+export interface LandingSection { id: string; type: LandingSectionType; order: number; visible: boolean; content: Record<string, unknown>; settings: Record<string, unknown>; }
+export interface LandingProperty { id: string; title: string; description: string | null; location: string | null; purpose: string; salePrice: string | null; rentPrice: string | null; bedrooms: number | null; suites: number | null; parkingSpaces: number | null; imageUrl: string | null; }
+export interface PublicIdentity { name: string; description: string | null; logoUrl: string | null; email: string | null; phone: string | null; whatsapp: string | null; instagramUrl: string | null; creci: string | null; address: string | null; }
+export interface LandingPageDocument { id: string; name: string; slug: string; templateId: string; templateVersion: number; schemaVersion: number; status: LandingStatus; theme: LandingTheme; seo: LandingSeo; identity: PublicIdentity; sections: LandingSection[]; properties: LandingProperty[]; publishedAt: string | null; updatedAt: string; }
+
+export const defaultTheme: LandingTheme = { primaryColor: "#2028FF", secondaryColor: "#5D5BFF", backgroundColor: "#FFFFFF", surfaceColor: "#F3F4FF", textColor: "#16182A", mutedTextColor: "#686D7D", buttonTextColor: "#FFFFFF", borderColor: "#DFE1F0" };
+export const sectionLabels: Record<LandingSectionType, string> = { hero: "Capa", "featured-properties": "Imóveis em destaque", about: "Sobre", services: "Como posso ajudar", regions: "Regiões atendidas", contact: "Fale comigo", footer: "Rodapé", custom: "Seção personalizada" };
+
