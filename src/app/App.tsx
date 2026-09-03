@@ -81,6 +81,7 @@ import { ReportsPage } from "./pages/ReportsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { PlatformAdminPage } from "./pages/PlatformAdminPage";
 import { GoalsPage } from "./pages/GoalsPage";
+import { LandingPagesPage } from "./pages/LandingPagesPage";
 import { NotificationCenter } from "./components/NotificationCenter";
 import {
   readActiveOrganizationId,
@@ -102,6 +103,7 @@ type PageKey =
   | "properties"
   | "propertyEditor"
   | "publications"
+  | "landingPages"
   | "authorizations"
   | "authorizationEditor"
   | "contracts"
@@ -121,6 +123,7 @@ type NavItem = {
   icon: NavIcon;
   available?: boolean;
   permission?: string;
+  fallbackPermissions?: string[];
   platformPermission?: string;
 };
 
@@ -185,6 +188,13 @@ const navigation: NavGroup[] = [
         path: "/app/publicacoes/",
         icon: ShareIcon,
         permission: "portfolio.publications.read",
+      },
+      {
+        label: "Landing Pages",
+        path: "/app/landing-pages/",
+        icon: GlobeIcon,
+        permission: "portfolio.landing_pages.read",
+        fallbackPermissions: ["portfolio.publications.read"],
       },
       {
         label: "Autorizações",
@@ -351,6 +361,13 @@ function currentPage(): {
       label: "Publicações",
       title: "Publicações",
     };
+  if (path === "/app/landing-pages/")
+    return {
+      key: "landingPages",
+      group: "Portfólio",
+      label: "Landing Pages",
+      title: "Landing Pages",
+    };
   if (path === "/app/autorizacao/")
     return {
       key: "authorizationEditor",
@@ -506,6 +523,11 @@ function navAvailable(item: NavItem, data: AppBootstrapResult): boolean {
   return (
     item.available === true ||
     Boolean(item.permission && hasPermission(data, item.permission)) ||
+    Boolean(
+      item.fallbackPermissions?.some((permission) =>
+        hasPermission(data, permission),
+      ),
+    ) ||
     Boolean(
       item.platformPermission &&
       hasPlatformPermission(data, item.platformPermission),
@@ -1578,6 +1600,13 @@ export function App() {
     bootstrap,
     "portfolio.publications.read",
   );
+  const canReadLandingPages =
+    hasPermission(bootstrap, "portfolio.landing_pages.read") ||
+    hasPermission(bootstrap, "portfolio.publications.read");
+  const canManageLandingPages =
+    hasPermission(bootstrap, "portfolio.landing_pages.manage") ||
+    (hasPermission(bootstrap, "portfolio.publications.create") &&
+      hasPermission(bootstrap, "portfolio.publications.update"));
   const canCreatePublication = hasPermission(
     bootstrap,
     "portfolio.publications.create",
@@ -1987,6 +2016,12 @@ export function App() {
               />
             ) : (
               <ModuleAccessDenied title="Contratos gerados" />
+            )
+          ) : page.key === "landingPages" ? (
+            canReadLandingPages ? (
+              <LandingPagesPage organizationId={activeOrganization.id} canManage={canManageLandingPages} />
+            ) : (
+              <ModuleAccessDenied title="Landing Pages" />
             )
           ) : page.key === "publications" ? (
             canReadPublications ? (

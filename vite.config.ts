@@ -27,6 +27,8 @@ export default defineConfig({
         appProperties: "app/imoveis/index.html",
         appProperty: "app/imovel/index.html",
         appPublications: "app/publicacoes/index.html",
+        appLandingPages: "app/landing-pages/index.html",
+        landingPagePreview: "imob/preview/index.html",
         appAuthorizations: "app/autorizacoes/index.html",
         appAuthorization: "app/autorizacao/index.html",
         appContracts: "app/contratos/index.html",
