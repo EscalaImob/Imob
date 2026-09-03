@@ -21,6 +21,14 @@ function publicUrl(slug: string) { return `${location.origin}/imob/${slug}`; }
 const themeFields: Array<[keyof LandingTheme, string]> = [["primaryColor", "Cor principal"], ["secondaryColor", "Cor secundária"], ["backgroundColor", "Fundo"], ["surfaceColor", "Superfícies"], ["textColor", "Texto"], ["mutedTextColor", "Texto de apoio"], ["buttonTextColor", "Texto dos botões"], ["borderColor", "Bordas"]];
 const localPreviewMode = import.meta.env.DEV && import.meta.env.VITE_LANDING_PAGES_PREVIEW_MODE === "true";
 
+function withNavigation(page: LandingPageDocument): LandingPageDocument {
+  if (page.sections.some((section) => section.type === "navigation")) return page;
+  const hero = page.sections.find((section) => section.type === "hero");
+  const content = hero?.content ?? {};
+  const navigation: LandingSection = { id: crypto.randomUUID(), type: "navigation", order: 0, visible: true, settings: {}, content: { propertiesLabel: content.navPropertiesLabel || "Imóveis", propertiesLink: "#imoveis", advertiseLabel: "Anunciar", advertiseLink: "#contato", aboutLabel: content.navAboutLabel || "Sobre mim", aboutLink: "#sobre", favoriteLabel: "Favoritos" } };
+  return { ...page, sections: [navigation, ...page.sections.map((section, index) => ({ ...section, order: index + 1 }))] };
+}
+
 function createLocalPreview(): LandingPageDocument {
   const now = new Date().toISOString();
   return { id: `local-${crypto.randomUUID()}`, name: "Minha Landing Page", slug: "minha-landing-page-preview", templateId: classicTemplate.id, templateVersion: classicTemplate.version, schemaVersion: 1, status: "draft", theme: { ...classicTemplate.defaultTheme }, seo: { title: "Minha Landing Page", description: "Uma vitrine profissional de imóveis.", openGraphTitle: "", openGraphDescription: "", openGraphImage: null }, identity: { name: "Sua Imobiliária", description: "Atendimento imobiliário profissional, próximo e transparente.", logoUrl: null, email: "contato@imobiliaria.com.br", phone: "(00) 0000-0000", whatsapp: "(00) 00000-0000", instagramUrl: null, creci: "CRECI 00000-F", address: "Sua cidade e região" }, sections: classicTemplate.createSections(), properties: [], publishedAt: null, updatedAt: now };
@@ -28,6 +36,7 @@ function createLocalPreview(): LandingPageDocument {
 
 const contentLabels: Record<string, string> = { title: "Título", eyebrow: "Subtítulo", description: "Descrição", buttonLabel: "Texto do botão", buttonLink: "Destino do botão", imageUrl: "Imagem (URL)", navPropertiesLabel: "Menu: imóveis", navAboutLabel: "Menu: sobre", navContactLabel: "Menu: contato", propertiesStatLabel: "Indicador: imóveis", credentialStatLabel: "Indicador: credenciamento", locationStatLabel: "Indicador: localização", nameLabel: "Formulário: nome", whatsappLabel: "Formulário: WhatsApp", emailLabel: "Formulário: e-mail", interestLabel: "Formulário: interesse", buyerOptionLabel: "Opção: comprar ou alugar", captureOptionLabel: "Opção: anunciar imóvel", messageLabel: "Formulário: mensagem", successMessage: "Mensagem de sucesso", copyrightText: "Texto de direitos autorais" };
 const identityFields: Array<[keyof LandingPageDocument["identity"], string]> = [["name", "Nome público"], ["description", "Apresentação"], ["logoUrl", "Logo (URL)"], ["email", "E-mail"], ["phone", "Telefone"], ["whatsapp", "WhatsApp"], ["instagramUrl", "Instagram (URL)"], ["creci", "CRECI"], ["address", "Localização/endereço"]];
+Object.assign(contentLabels,{propertiesLabel:"Menu: imóveis",propertiesLink:"Link: imóveis",advertiseLabel:"Menu: anunciar",advertiseLink:"Link: anunciar",aboutLabel:"Menu: sobre mim",aboutLink:"Link: sobre mim",favoriteLabel:"Acessibilidade: favoritos",marketYearsValue:"Indicador: experiência",marketYearsLabel:"Legenda: experiência"});
 
 function editorControl(key: string, value: string, onChange: (value: string) => void) {
   const multiline = key === "description" || key === "successMessage";
@@ -77,7 +86,7 @@ export function LandingPagesPage({ organizationId, canManage }: { organizationId
     return () => { active = false; };
   }, [organizationId]);
 
-  async function open(id: string) { setBusy(true); setError(""); try { const value = await getLandingPage(organizationId, id); setPage(value); setSelectedId(value.sections[0]?.id || null); } catch (cause) { setError(cause instanceof AppApiError ? cause.message : "Não foi possível abrir a página."); } finally { setBusy(false); } }
+  async function open(id: string) { setBusy(true); setError(""); try { const value = withNavigation(await getLandingPage(organizationId, id)); setPage(value); setSelectedId(value.sections[0]?.id || null); } catch (cause) { setError(cause instanceof AppApiError ? cause.message : "Não foi possível abrir a página."); } finally { setBusy(false); } }
   async function create() { setBusy(true); setError(""); try { if (localPreviewMode) { const value = createLocalPreview(); setPage(value); setSelectedId(value.sections[0]?.id || null); setMessage("Prévia local criada — nada será salvo"); return; } const identity = await getOrganizationIdentity(organizationId); const value = await createLandingPage(organizationId, { name: identity.brandName || identity.organizationName, templateId: classicTemplate.id }); setList((current) => [{ id: value.id, name: value.name, slug: value.slug, status: value.status, templateId: value.templateId, updatedAt: value.updatedAt, publishedAt: value.publishedAt }, ...current]); setPage(value); setSelectedId(value.sections[0]?.id || null); } catch (cause) { setError(cause instanceof AppApiError ? cause.message : "Não foi possível criar a landing page."); } finally { setBusy(false); } }
   function updateSection(id: string, recipe: (section: LandingSection) => LandingSection) { setPage((current) => current ? { ...current, sections: current.sections.map((section) => section.id === id ? recipe(section) : section) } : current); }
   function dragEnd(event: DragEndEvent) { if (!page || event.over === null || event.active.id === event.over.id) return; const oldIndex = page.sections.findIndex((section) => section.id === event.active.id); const newIndex = page.sections.findIndex((section) => section.id === event.over!.id); setPage({ ...page, sections: arrayMove(page.sections, oldIndex, newIndex).map((section, order) => ({ ...section, order })) }); }
