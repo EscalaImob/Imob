@@ -32,13 +32,17 @@ function withNavigation(page: LandingPageDocument): LandingPageDocument {
   const defaultContent = new Map(classicTemplate.createSections().map((section) => [section.type, section.content]));
   sections = sections.map((section) => {
     const enriched = { ...section, content: { ...(defaultContent.get(section.type) || {}), ...section.content } };
+    if (section.type === "regions") {
+      const regionItems = Array.isArray(enriched.content.items) ? enriched.content.items.map((item) => item && typeof item === "object" && !Array.isArray(item) ? { visible: true, ...item } : item) : [];
+      return { ...enriched, content: { ...enriched.content, items: regionItems } };
+    }
     if (section.type !== "featured-properties") return enriched;
     const current = Array.isArray(section.content.images) ? section.content.images : [];
     const images = Array.from({ length: 9 }, (_, index) => {
       const item = current[index];
-      if (!item || typeof item !== "object" || Array.isArray(item)) return { imageUrl: "", imageStorageKey: "" };
+      if (!item || typeof item !== "object" || Array.isArray(item)) return { visible: true, imageUrl: "", imageStorageKey: "" };
       const record = item as Record<string, unknown>;
-      return { imageUrl: typeof record.imageUrl === "string" ? record.imageUrl : "", imageStorageKey: typeof record.imageStorageKey === "string" ? record.imageStorageKey : "" };
+      return { visible: record.visible !== false, imageUrl: typeof record.imageUrl === "string" ? record.imageUrl : "", imageStorageKey: typeof record.imageStorageKey === "string" ? record.imageStorageKey : "" };
     });
     return { ...enriched, content: { ...enriched.content, images } };
   });
@@ -52,7 +56,7 @@ function createLocalPreview(): LandingPageDocument {
 
 const contentLabels: Record<string, string> = { title: "Título", eyebrow: "Subtítulo", description: "Descrição", buttonLabel: "Texto do botão", buttonLink: "Destino do botão", imageUrl: "Imagem (URL)", navPropertiesLabel: "Menu: imóveis", navAboutLabel: "Menu: sobre", navContactLabel: "Menu: contato", propertiesStatLabel: "Indicador: imóveis", credentialStatLabel: "Indicador: credenciamento", locationStatLabel: "Indicador: localização", nameLabel: "Formulário: nome", whatsappLabel: "Formulário: WhatsApp", emailLabel: "Formulário: e-mail", interestLabel: "Formulário: interesse", buyerOptionLabel: "Opção: comprar ou alugar", captureOptionLabel: "Opção: anunciar imóvel", messageLabel: "Formulário: mensagem", successMessage: "Mensagem de sucesso", copyrightText: "Texto de direitos autorais" };
 const identityFields: Array<[keyof LandingPageDocument["identity"], string]> = [["name", "Nome público"], ["description", "Apresentação"], ["logoUrl", "Logo (URL)"], ["email", "E-mail"], ["phone", "Telefone"], ["whatsapp", "WhatsApp"], ["instagramUrl", "Instagram (URL)"], ["creci", "CRECI"], ["address", "Localização/endereço"]];
-Object.assign(contentLabels,{propertiesLabel:"Menu: imóveis",propertiesLink:"Link: imóveis",advertiseLabel:"Menu: anunciar",advertiseLink:"Link: anunciar",aboutLabel:"Menu: sobre mim",aboutLink:"Link: sobre mim",favoriteLabel:"Acessibilidade: favoritos",marketYearsValue:"Indicador: experiência",marketYearsLabel:"Legenda: experiência",images:"Imagens dos nove destaques",officeLabel:"Contato: escritório",whatsappInfoLabel:"Contato: WhatsApp",emailInfoLabel:"Contato: e-mail",websiteLabel:"Contato: website",websiteValue:"Website",creciLabel:"Contato: CRECI",navigationTitle:"Rodapé: título da navegação",navigationItems:"Links de navegação",regionsTitle:"Rodapé: título das regiões",regionItems:"Links de regiões",instagramUrl:"Instagram (URL)",tiktokUrl:"TikTok (URL)",youtubeUrl:"YouTube (URL)",privacyLabel:"Texto da política de privacidade",privacyLink:"Link da política de privacidade",developerLabel:"Crédito de desenvolvimento"});
+Object.assign(contentLabels,{propertiesLabel:"Menu: imóveis",propertiesLink:"Link: imóveis",advertiseLabel:"Menu: anunciar",advertiseLink:"Link: anunciar",aboutLabel:"Menu: sobre mim",aboutLink:"Link: sobre mim",favoriteLabel:"Acessibilidade: favoritos",marketYearsValue:"Indicador: experiência",marketYearsLabel:"Legenda: experiência",images:"Imagens dos nove destaques",visible:"Exibir este item",officeLabel:"Contato: escritório",whatsappInfoLabel:"Contato: WhatsApp",emailInfoLabel:"Contato: e-mail",websiteLabel:"Contato: website",websiteValue:"Website",creciLabel:"Contato: CRECI",navigationTitle:"Rodapé: título da navegação",navigationItems:"Links de navegação",regionsTitle:"Rodapé: título das regiões",regionItems:"Links de regiões",instagramUrl:"Instagram (URL)",tiktokUrl:"TikTok (URL)",youtubeUrl:"YouTube (URL)",privacyLabel:"Texto da política de privacidade",privacyLink:"Link da política de privacidade",developerLabel:"Crédito de desenvolvimento"});
 
 function editorControl(key: string, value: string, onChange: (value: string) => void) {
   const multiline = key === "description" || key === "successMessage";
@@ -67,6 +71,7 @@ function ImageUploadControl({ value, disabled, onChange, onUpload }: { value: st
 }
 
 function ContentFields({ content, disabled, onChange, onImageUpload }: { content: Record<string, unknown>; disabled: boolean; onChange: (content: Record<string, unknown>) => void; onImageUpload: (file: File) => Promise<{ imageUrl: string; storageKey: string }> }) {
+  const isRegions = content.allowAdditionalItems === true;
   const imageControl=(value:string,record:Record<string,unknown>,commit:(next:Record<string,unknown>)=>void)=><ImageUploadControl value={value} disabled={disabled} onChange={(next)=>commit({...record,imageUrl:next,imageStorageKey:""})} onUpload={async(file)=>{const uploaded=await onImageUpload(file);commit({...record,imageUrl:uploaded.imageUrl,imageStorageKey:uploaded.storageKey});}}/>;
   return <>{Object.entries(content).map(([key, value]) => {
     if(key==="imageStorageKey")return null;
@@ -77,8 +82,8 @@ function ContentFields({ content, disabled, onChange, onImageUpload }: { content
       if (!item || typeof item !== "object" || Array.isArray(item)) return null;
       const record = item as Record<string, unknown>;
       const commit=(next:Record<string,unknown>)=>{const items=[...value];items[index]=next;onChange({...content,[key]:items});};
-      return <div className="lp-editor-nested" key={index}><strong>Item {index + 1}</strong>{Object.entries(record).map(([itemKey, itemValue]) => {if(itemKey==="imageStorageKey")return null;if(itemKey==="imageUrl"&&typeof itemValue==="string")return <div key={itemKey}>{imageControl(itemValue,record,commit)}</div>;return typeof itemValue === "string" ? editorControl(itemKey, itemValue, (next) => commit({ ...record, [itemKey]: next })) : null;})}</div>;
-    })}</fieldset>;
+      return <div className="lp-editor-nested" key={index}><strong>Item {index + 1}</strong>{Object.entries(record).map(([itemKey, itemValue]) => {if(itemKey==="imageStorageKey")return null;if(itemKey==="visible"&&typeof itemValue==="boolean")return <label className="lp-editor-visibility" key={itemKey}><input type="checkbox" checked={itemValue} disabled={disabled} onChange={(event)=>commit({...record,visible:event.target.checked})}/>{contentLabels.visible}</label>;if(itemKey==="imageUrl"&&typeof itemValue==="string")return <div key={itemKey}>{imageControl(itemValue,record,commit)}</div>;return typeof itemValue === "string" ? editorControl(itemKey, itemValue, (next) => commit({ ...record, [itemKey]: next })) : null;})}{isRegions&&<button type="button" className="app-secondary-button" disabled={disabled} onClick={()=>onChange({...content,[key]:value.filter((_,itemIndex)=>itemIndex!==index)})}>Remover cidade</button>}</div>;
+    })}{isRegions&&<button type="button" className="app-secondary-button" disabled={disabled} onClick={()=>onChange({...content,[key]:[...value,{visible:true,title:"Nova cidade",imageUrl:"",imageStorageKey:""}]})}>+ Adicionar cidade</button>}</fieldset>;
   })}</>;
 }
 
