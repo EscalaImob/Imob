@@ -35,15 +35,15 @@ interface PendingRequest<T> {
 }
 
 const labelMap: Record<string, { category: PropertyPhotoCategory; label: string }> = {
-  "residential property exterior facade": { category: "facade", label: "Fachada" },
-  "living room interior": { category: "living_room", label: "Sala" },
-  "kitchen interior": { category: "kitchen", label: "Cozinha" },
-  "bedroom interior": { category: "bedroom", label: "Quarto" },
-  "bathroom interior": { category: "bathroom", label: "Banheiro" },
-  "balcony or terrace": { category: "balcony", label: "Varanda / terraço" },
-  "leisure area with pool gym or barbecue": { category: "leisure", label: "Área de lazer" },
-  "outdoor yard garden or patio": { category: "outdoor", label: "Área externa" },
-  "other real estate photo": { category: "other", label: "Outros" },
+  "the exterior facade of a residential property": { category: "facade", label: "Fachada" },
+  "the interior of a living room": { category: "living_room", label: "Sala" },
+  "the interior of a kitchen": { category: "kitchen", label: "Cozinha" },
+  "the interior of a bedroom": { category: "bedroom", label: "Quarto" },
+  "the interior of a bathroom": { category: "bathroom", label: "Banheiro" },
+  "a balcony or terrace of a residential property": { category: "balcony", label: "Varanda / terraço" },
+  "a residential leisure area with a pool, gym, or barbecue": { category: "leisure", label: "Área de lazer" },
+  "an outdoor yard, garden, or patio of a residential property": { category: "outdoor", label: "Área externa" },
+  "another type of real estate photo": { category: "other", label: "Outros" },
 };
 
 let worker: Worker | null = null;
@@ -115,13 +115,17 @@ export async function classifyPropertyPhoto(
     onProgress,
   );
   if (!Array.isArray(message.result) || message.result.length === 0) throw new Error("CLASSIFICATION_EMPTY");
-  const scores = message.result.flatMap((item) => {
+  const rawScores = message.result.flatMap((item) => {
     if (!item || typeof item !== "object") return [];
     const candidate = item as { label?: unknown; score?: unknown };
     if (typeof candidate.label !== "string" || typeof candidate.score !== "number") return [];
     const mapped = labelMap[candidate.label];
-    return mapped ? [{ ...mapped, confidence: candidate.score }] : [];
+    return mapped ? [{ ...mapped, confidence: Math.max(0, candidate.score) }] : [];
   });
+  const total = rawScores.reduce((sum, item) => sum + item.confidence, 0);
+  const scores = rawScores
+    .map((item) => ({ ...item, confidence: total > 0 ? item.confidence / total : 0 }))
+    .sort((left, right) => right.confidence - left.confidence);
   const best = scores[0];
   if (!best) throw new Error("CLASSIFICATION_EMPTY");
   return { ...best, scores };

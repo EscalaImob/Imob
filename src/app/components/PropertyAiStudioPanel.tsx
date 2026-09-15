@@ -238,7 +238,7 @@ export function PropertyAiStudioPanel({ organizationId, propertyId, canUpdate, h
       {visionError && <div className="app-inline-error">{visionError}</div>}
       {loadingImages ? <div className="app-table-empty"><span className="app-spinner"/>Carregando imagens...</div> : images.length === 0 ? <div className="app-soft-empty">Adicione fotos na aba Imagens antes de usar a análise local.</div> : <div className="app-ai-photo-grid">{images.map((image) => {
         const result = analysis[image.id];
-        return <article key={image.id}><img src={image.viewUrl} alt={image.originalName}/><div><strong>{result?.label ?? "Ainda não analisada"}</strong>{result ? <span>{confidenceLabel(result.confidence)} de confiança</span> : <span>{image.primary ? "Foto principal" : `Posição ${image.sortOrder + 1}`}</span>}</div></article>;
+        return <article key={image.id}><img src={image.viewUrl} alt={image.originalName}/><div><strong>{result?.label ?? "Ainda não analisada"}</strong>{result ? <span>{confidenceLabel(result.confidence)} de confiança relativa</span> : <span>{image.primary ? "Foto principal" : `Posição ${image.sortOrder + 1}`}</span>}</div></article>;
       })}</div>}
       <p className="app-ai-privacy-note">As fotos são processadas localmente pelo Transformers.js. Nenhum token da Hugging Face é usado no MVP.</p>
     </section>

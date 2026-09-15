@@ -28,15 +28,15 @@ const TRANSFORMERS_ESM = "https://cdn.jsdelivr.net/npm/@huggingface/transformers
 const CLASSIFICATION_MODEL = "Xenova/siglip-base-patch16-224";
 const DEPTH_MODEL = "onnx-community/depth-anything-v2-small";
 const labels = [
-  "residential property exterior facade",
-  "living room interior",
-  "kitchen interior",
-  "bedroom interior",
-  "bathroom interior",
-  "balcony or terrace",
-  "leisure area with pool gym or barbecue",
-  "outdoor yard garden or patio",
-  "other real estate photo",
+  "the exterior facade of a residential property",
+  "the interior of a living room",
+  "the interior of a kitchen",
+  "the interior of a bedroom",
+  "the interior of a bathroom",
+  "a balcony or terrace of a residential property",
+  "a residential leisure area with a pool, gym, or barbecue",
+  "an outdoor yard, garden, or patio of a residential property",
+  "another type of real estate photo",
 ];
 
 let transformersPromise: Promise<TransformersModule> | null = null;
@@ -124,7 +124,7 @@ scope.onmessage = (event) => {
         const result = normalizedClassification(await pipe(
           request.imageUrl,
           labels,
-          { hypothesis_template: "a photo of {}" },
+          { hypothesis_template: "{}" },
         ));
         scope.postMessage({ id: request.id, type: "classification", result });
         return;
