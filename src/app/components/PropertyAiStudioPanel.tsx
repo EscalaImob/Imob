@@ -3,6 +3,13 @@ import { AppApiError } from "../../services/appApi";
 import { generatePropertyMarketingText, type AiStudioTextKind, type AiStudioTextResult } from "../../services/aiStudioApi";
 import { listPropertyImages, type PropertyImageItem } from "../../services/propertiesApi";
 import {
+  createReelLiteMp4,
+  reelLiteSupport,
+  type ReelLiteProgress,
+  type ReelLiteResult,
+  type ReelLiteSource,
+} from "../ai/reelLite";
+import {
   browserVisionSupport,
   classifyPropertyPhoto,
   estimatePropertyPhotoDepth,
@@ -14,6 +21,7 @@ import {
 interface Props {
   organizationId: string;
   propertyId: string | null;
+  propertyTitle: string;
   canUpdate: boolean;
   hasUnsavedChanges: boolean;
 }
@@ -155,7 +163,7 @@ function DepthParallaxPreview({ imageUrl, depth }: { imageUrl: string; depth: Pr
   </div>;
 }
 
-export function PropertyAiStudioPanel({ organizationId, propertyId, canUpdate, hasUnsavedChanges }: Props) {
+export function PropertyAiStudioPanel({ organizationId, propertyId, propertyTitle, canUpdate, hasUnsavedChanges }: Props) {
   const [images, setImages] = useState<PropertyImageItem[]>([]);
   const [loadingImages, setLoadingImages] = useState(Boolean(propertyId));
   const [visionBusy, setVisionBusy] = useState(false);
@@ -167,7 +175,12 @@ export function PropertyAiStudioPanel({ organizationId, propertyId, canUpdate, h
   const [textBusy, setTextBusy] = useState<AiStudioTextKind | null>(null);
   const [textResult, setTextResult] = useState<AiStudioTextResult | null>(null);
   const [textError, setTextError] = useState<string | null>(null);
+  const [reelBusy, setReelBusy] = useState(false);
+  const [reelProgress, setReelProgress] = useState<ReelLiteProgress | null>(null);
+  const [reelError, setReelError] = useState<string | null>(null);
+  const [reelResult, setReelResult] = useState<(ReelLiteResult & { url: string }) | null>(null);
   const support = useMemo(() => browserVisionSupport(), []);
+  const reelSupport = useMemo(() => reelLiteSupport(), []);
 
   const loadImages = useCallback(async () => {
     if (!propertyId) {
@@ -188,6 +201,9 @@ export function PropertyAiStudioPanel({ organizationId, propertyId, canUpdate, h
   }, [organizationId, propertyId]);
 
   useEffect(() => { void loadImages(); }, [loadImages]);
+  useEffect(() => () => {
+    if (reelResult?.url) URL.revokeObjectURL(reelResult.url);
+  }, [reelResult?.url]);
 
   async function analyzePhotos() {
     if (!support.supported || visionBusy || images.length === 0 || !propertyId) return;
@@ -249,6 +265,63 @@ export function PropertyAiStudioPanel({ organizationId, propertyId, canUpdate, h
     }
   }
 
+  async function generateReelLite() {
+    if (!propertyId || reelBusy || images.length === 0 || !reelSupport.supported) return;
+    setReelBusy(true);
+    setReelError(null);
+    setReelProgress({ phase: "loading", progress: 0, message: "Preparando fotos e profundidade..." });
+    if (reelResult?.url) URL.revokeObjectURL(reelResult.url);
+    setReelResult(null);
+
+    try {
+      const freshImages = await listPropertyImages(organizationId, propertyId);
+      setImages(freshImages);
+      const selected = freshImages.slice(0, 6);
+      const sources: ReelLiteSource[] = [];
+
+      for (let index = 0; index < selected.length; index += 1) {
+        const image = selected[index]!;
+        setReelProgress({
+          phase: "loading",
+          progress: index / Math.max(1, selected.length),
+          message: `Calculando profundidade · foto ${index + 1} de ${selected.length}...`,
+        });
+        let imageDepth: PropertyDepthMap | null = null;
+        try {
+          imageDepth = await estimatePropertyPhotoDepth(image.viewUrl);
+        } catch (error) {
+          console.warn("[Estúdio IMOB] Profundidade indisponível no Reel Lite; usando movimento simples.", {
+            imageId: image.id,
+            imageName: image.originalName,
+            error: error instanceof Error ? error.message : "DEPTH_FAILED",
+          });
+        }
+        sources.push({
+          id: image.id,
+          imageUrl: image.viewUrl,
+          label: analysis[image.id]?.label ?? (image.primary ? "Foto principal" : `Foto ${index + 1}`),
+          depth: imageDepth,
+        });
+      }
+
+      const result = await createReelLiteMp4(sources, propertyTitle, setReelProgress);
+      const url = URL.createObjectURL(result.blob);
+      setReelResult({ ...result, url });
+      setReelProgress(null);
+    } catch (error) {
+      console.warn("[Estúdio IMOB] Falha ao exportar Reel Lite", error);
+      const code = error instanceof Error ? error.message : "REEL_FAILED";
+      setReelError(
+        code === "REEL_MP4_UNSUPPORTED"
+          ? "Este navegador não oferece exportação MP4 local. Use Chrome, Edge ou Safari atualizado."
+          : "Não foi possível gerar o Reel Lite. As fotos continuam intactas; tente novamente.",
+      );
+      setReelProgress(null);
+    } finally {
+      setReelBusy(false);
+    }
+  }
+
   async function generateText(kind: AiStudioTextKind) {
     if (!propertyId || textBusy || !canUpdate) return;
     setTextBusy(kind);
@@ -303,6 +376,34 @@ export function PropertyAiStudioPanel({ organizationId, propertyId, canUpdate, h
       {textResult && <div className="app-ai-text-result"><header><strong>Conteúdo gerado</strong><span>{textResult.source === "cloudflare" ? "Workers AI" : "Fallback IMOB"}</span></header><textarea readOnly rows={8} value={textResult.text}/><div><button type="button" className="app-secondary-button" onClick={() => void navigator.clipboard?.writeText(textResult.text)}>Copiar texto</button>{textResult.source === "template" && <small>O conteúdo foi produzido sem chamada de IA externa.</small>}</div></div>}
     </section>
 
-    <section className="app-ai-roadmap-note"><strong>Reel Lite</strong><p>Esta primeira entrega prepara classificação, profundidade e conteúdo textual. A exportação MP4 com composição própria entra na próxima etapa do MVP, sem Kling, Veo ou Pedra.</p></section>
+    <section className="app-form-section app-ai-section app-ai-reel-section">
+      <div className="app-section-title-row">
+        <div>
+          <h2>4. Reel Lite em MP4</h2>
+          <p className="app-form-help">Gera um vídeo vertical 9:16 no próprio navegador, usando até 6 fotos, movimento 2.5D quando a profundidade estiver disponível e composição da Escala IMOB.</p>
+        </div>
+        <span className="app-ai-runtime-badge">720 × 1280 · MP4</span>
+      </div>
+      {!reelSupport.supported && <div className="app-inline-error">{reelSupport.reason}</div>}
+      {reelError && <div className="app-inline-error">{reelError}</div>}
+      {reelProgress && <div className="app-property-uploading"><span className="app-spinner"/>{reelProgress.message}</div>}
+      <div className="app-ai-reel-controls">
+        <div>
+          <strong>{Math.min(images.length, 6)} foto(s) no Reel</strong>
+          <span>Ordem da galeria · aproximadamente {Math.max(1, Math.min(images.length, 6)) * 2.7} s · sem custo de API visual</span>
+        </div>
+        <button type="button" className="app-primary-button" onClick={() => void generateReelLite()} disabled={reelBusy || images.length === 0 || !reelSupport.supported}>
+          {reelBusy ? "Gerando MP4..." : reelResult ? "Gerar novamente" : "Gerar Reel Lite MP4"}
+        </button>
+      </div>
+      {reelResult && <div className="app-ai-reel-result">
+        <video controls playsInline src={reelResult.url} aria-label="Prévia do Reel Lite gerado"/>
+        <div>
+          <div><strong>Reel Lite pronto</strong><span>{reelResult.imageCount} foto(s) · {reelResult.durationSeconds.toFixed(1)} s · 9:16</span></div>
+          <a className="app-primary-button" href={reelResult.url} download={reelResult.filename}>Baixar MP4</a>
+        </div>
+      </div>}
+      <p className="app-ai-privacy-note">A exportação acontece localmente no navegador. Nesta primeira versão o vídeo é silencioso; trilha e templates avançados entram depois, sem depender de Kling, Veo ou Pedra.</p>
+    </section>
   </div>;
 }
