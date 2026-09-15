@@ -82,6 +82,24 @@ async function classifyPhotoWithRetry(
   throw lastError instanceof Error ? lastError : new Error("CLASSIFICATION_FAILED");
 }
 
+async function estimateDepthWithRetry(
+  imageUrl: string,
+  onProgress?: (progress: { status: string | null; progress: number | null; file: string | null }) => void,
+): Promise<PropertyDepthMap> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await estimatePropertyPhotoDepth(imageUrl, onProgress);
+    } catch (error) {
+      lastError = error;
+      if (attempt === 1) break;
+      resetBrowserVisionWorker();
+      await wait(600);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("DEPTH_FAILED");
+}
+
 function DepthParallaxPreview({ imageUrl, depth }: { imageUrl: string; depth: PropertyDepthMap }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sourceRef = useRef<ImageData | null>(null);
@@ -217,6 +235,7 @@ export function PropertyAiStudioPanel({
   const [aiRuntimeError, setAiRuntimeError] = useState<string | null>(null);
   const [reelUsageWarning, setReelUsageWarning] = useState<string | null>(null);
   const runtimeDefaultsAppliedRef = useRef<string | null>(null);
+  const reelDepthCacheRef = useRef<Map<string, PropertyDepthMap>>(new Map());
   const support = useMemo(() => browserVisionSupport(), []);
   const reelSupport = useMemo(() => reelLiteSupport(), []);
 
@@ -229,8 +248,12 @@ export function PropertyAiStudioPanel({
     setLoadingImages(true);
     try {
       const result = await listPropertyImages(organizationId, propertyId);
+      const activeIds = new Set(result.map((item) => item.id));
+      for (const imageId of reelDepthCacheRef.current.keys()) {
+        if (!activeIds.has(imageId)) reelDepthCacheRef.current.delete(imageId);
+      }
       setImages(result);
-      if (result.length) setDepthImageId((current) => current ?? (result.find((item) => item.primary) ?? result[0])?.id ?? null);
+      if (result.length) setDepthImageId((current) => current && activeIds.has(current) ? current : (result.find((item) => item.primary) ?? result[0])?.id ?? null);
     } catch {
       setVisionError("Não foi possível carregar as imagens do imóvel.");
     } finally {
@@ -239,6 +262,13 @@ export function PropertyAiStudioPanel({
   }, [organizationId, propertyId]);
 
   useEffect(() => { void loadImages(); }, [loadImages]);
+
+  useEffect(() => {
+    reelDepthCacheRef.current.clear();
+    setDepth(null);
+    setAnalysis({});
+    setVisionError(null);
+  }, [organizationId, propertyId]);
 
   useEffect(() => {
     runtimeDefaultsAppliedRef.current = null;
@@ -336,7 +366,9 @@ export function PropertyAiStudioPanel({
     setDepth(null);
     setVisionProgress(null);
     try {
-      setDepth(await estimatePropertyPhotoDepth(selected.viewUrl, setVisionProgress));
+      const nextDepth = await estimateDepthWithRetry(selected.viewUrl, setVisionProgress);
+      reelDepthCacheRef.current.set(selected.id, nextDepth);
+      setDepth(nextDepth);
     } catch {
       setVisionError("Não foi possível calcular a profundidade desta foto no navegador.");
     } finally {
@@ -371,15 +403,18 @@ export function PropertyAiStudioPanel({
           progress: index / Math.max(1, selected.length),
           message: `Calculando profundidade · foto ${index + 1} de ${selected.length}...`,
         });
-        let imageDepth: PropertyDepthMap | null = null;
-        try {
-          imageDepth = await estimatePropertyPhotoDepth(image.viewUrl);
-        } catch (error) {
-          console.warn("[Estúdio IMOB] Profundidade indisponível no Reel Lite; usando movimento simples.", {
-            imageId: image.id,
-            imageName: image.originalName,
-            error: error instanceof Error ? error.message : "DEPTH_FAILED",
-          });
+        let imageDepth: PropertyDepthMap | null = reelDepthCacheRef.current.get(image.id) ?? null;
+        if (!imageDepth) {
+          try {
+            imageDepth = await estimateDepthWithRetry(image.viewUrl);
+            reelDepthCacheRef.current.set(image.id, imageDepth);
+          } catch (error) {
+            console.warn("[Estúdio IMOB] Profundidade indisponível no Reel Lite; usando movimento simples.", {
+              imageId: image.id,
+              imageName: image.originalName,
+              error: error instanceof Error ? error.message : "DEPTH_FAILED",
+            });
+          }
         }
         sources.push({
           id: image.id,

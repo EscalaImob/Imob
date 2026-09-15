@@ -32,6 +32,7 @@ interface PendingRequest<T> {
   resolve(value: T): void;
   reject(reason?: unknown): void;
   onProgress?: (progress: WorkerProgress) => void;
+  timeoutId: number;
 }
 
 interface ImagePayload {
@@ -67,6 +68,25 @@ const labelMap: Record<string, { category: PropertyPhotoCategory; label: string 
 let worker: Worker | null = null;
 let sequence = 0;
 const pending = new Map<string, PendingRequest<unknown>>();
+const WORKER_REQUEST_TIMEOUT_MS = 90_000;
+
+function rejectAllPending(reason: Error): void {
+  for (const request of pending.values()) {
+    globalThis.clearTimeout(request.timeoutId);
+    request.reject(reason);
+  }
+  pending.clear();
+}
+
+function terminateVisionWorker(reason?: Error): void {
+  if (reason) rejectAllPending(reason);
+  else {
+    for (const request of pending.values()) globalThis.clearTimeout(request.timeoutId);
+    pending.clear();
+  }
+  worker?.terminate();
+  worker = null;
+}
 
 function visionWorker(): Worker {
   if (!worker) {
@@ -97,6 +117,7 @@ function visionWorker(): Worker {
         return;
       }
       pending.delete(message.id);
+      globalThis.clearTimeout(request.timeoutId);
       if (message.type === "error") {
         request.reject(new Error(typeof message.message === "string" ? message.message : "VISION_ERROR"));
         return;
@@ -104,10 +125,7 @@ function visionWorker(): Worker {
       request.resolve(message);
     });
     worker.addEventListener("error", () => {
-      for (const request of pending.values()) request.reject(new Error("VISION_WORKER_ERROR"));
-      pending.clear();
-      worker?.terminate();
-      worker = null;
+      terminateVisionWorker(new Error("VISION_WORKER_ERROR"));
     });
   }
   return worker;
@@ -119,16 +137,29 @@ function request<T>(
 ): Promise<T> {
   const id = `vision-${Date.now()}-${++sequence}`;
   return new Promise<T>((resolve, reject) => {
-    pending.set(id, { resolve: resolve as (value: unknown) => void, reject, onProgress });
-    visionWorker().postMessage({ ...payload, id });
+    const timeoutId = globalThis.setTimeout(() => {
+      if (!pending.has(id)) return;
+      terminateVisionWorker(new Error("VISION_WORKER_TIMEOUT"));
+    }, WORKER_REQUEST_TIMEOUT_MS);
+    pending.set(id, { resolve: resolve as (value: unknown) => void, reject, onProgress, timeoutId });
+    const message = { ...payload, id };
+    const imageData = payload.imageData;
+    try {
+      if (imageData instanceof ArrayBuffer) {
+        visionWorker().postMessage(message, [imageData]);
+      } else {
+        visionWorker().postMessage(message);
+      }
+    } catch (error) {
+      globalThis.clearTimeout(timeoutId);
+      pending.delete(id);
+      reject(error);
+    }
   });
 }
 
 export function resetBrowserVisionWorker(): void {
-  for (const request of pending.values()) request.reject(new Error("VISION_WORKER_RESET"));
-  pending.clear();
-  worker?.terminate();
-  worker = null;
+  terminateVisionWorker(new Error("VISION_WORKER_RESET"));
 }
 
 export async function classifyPropertyPhoto(

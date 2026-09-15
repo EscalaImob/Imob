@@ -152,6 +152,18 @@ function supportedMimeType(candidates: readonly string[]): string | null {
   return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) ?? null;
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, code: string): Promise<T> {
+  let timeoutId = 0;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = globalThis.setTimeout(() => reject(new Error(code)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
+}
+
 export function reelLiteSupport(): ReelLiteSupport {
   if (typeof document === "undefined" || typeof MediaRecorder === "undefined") {
     return {
@@ -730,7 +742,14 @@ async function prepareSources(
 
 async function createSoundtrackRuntime(): Promise<SoundtrackRuntime> {
   const context = new AudioContext({ sampleRate: 48_000 });
-  await context.resume();
+  try {
+    if (context.state !== "running") {
+      await withTimeout(context.resume(), 3_000, "REEL_AUDIO_RESUME_TIMEOUT");
+    }
+  } catch (error) {
+    await withTimeout(context.close(), 1_500, "REEL_AUDIO_CLOSE_TIMEOUT").catch(() => undefined);
+    throw error;
+  }
   const destination = context.createMediaStreamDestination();
   const master = context.createGain();
   master.gain.value = 0.22;
@@ -816,15 +835,23 @@ export async function createReelLiteMp4(
 
   const videoStream = canvas.captureStream(FPS);
   let soundtrack: SoundtrackRuntime | null = null;
-  const audioIncluded = Boolean(options.soundtrack && support.audioSupported && support.audioMimeType);
+  let audioIncluded = false;
   const recorderStream = new MediaStream(videoStream.getVideoTracks());
   let recorderMimeType = support.mimeType;
 
-  if (audioIncluded && support.audioMimeType) {
-    soundtrack = await createSoundtrackRuntime();
-    const audioTrack = soundtrack.destination.stream.getAudioTracks()[0];
-    if (audioTrack) recorderStream.addTrack(audioTrack);
-    recorderMimeType = support.audioMimeType;
+  if (options.soundtrack && support.audioSupported && support.audioMimeType) {
+    try {
+      soundtrack = await createSoundtrackRuntime();
+      const audioTrack = soundtrack.destination.stream.getAudioTracks()[0];
+      if (audioTrack) {
+        recorderStream.addTrack(audioTrack);
+        recorderMimeType = support.audioMimeType;
+        audioIncluded = true;
+      }
+    } catch (error) {
+      console.warn("[Estúdio IMOB] Trilha local indisponível nesta geração; exportando sem áudio.", error);
+      soundtrack = null;
+    }
   }
 
   const chunks: BlobPart[] = [];
@@ -853,8 +880,25 @@ export async function createReelLiteMp4(
     soundtrack?.start(durationSeconds);
     const startedAt = performance.now();
 
-    await new Promise<void>((resolve) => {
+    await new Promise<void>((resolve, reject) => {
+      let frameId = 0;
+      let settled = false;
+      const timeoutId = globalThis.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        if (frameId) cancelAnimationFrame(frameId);
+        reject(new Error("REEL_RENDER_TIMEOUT"));
+      }, Math.ceil((durationSeconds + 10) * 1000));
+
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        globalThis.clearTimeout(timeoutId);
+        resolve();
+      };
+
       const render = (now: number) => {
+        if (settled) return;
         const elapsed = Math.min(durationSeconds, (now - startedAt) / 1000);
 
         if (elapsed < scenesDuration) {
@@ -889,17 +933,17 @@ export async function createReelLiteMp4(
           onProgress?.({ phase: "rendering", progress: percent / 100, message: `Renderizando Reel Lite · ${percent}%` });
         }
         if (elapsed >= durationSeconds) {
-          resolve();
+          finish();
           return;
         }
-        requestAnimationFrame(render);
+        frameId = requestAnimationFrame(render);
       };
-      requestAnimationFrame(render);
+      frameId = requestAnimationFrame(render);
     });
 
     onProgress?.({ phase: "finalizing", progress: 1, message: "Finalizando MP4..." });
     recorder.stop();
-    await stopped;
+    await withTimeout(stopped, 10_000, "REEL_RECORDER_STOP_TIMEOUT");
     if (recorderError) throw recorderError;
     const blob = new Blob(chunks, { type: recorderMimeType });
     if (blob.size === 0) throw new Error("REEL_EMPTY_OUTPUT");
@@ -915,11 +959,15 @@ export async function createReelLiteMp4(
       template: options.template,
     };
   } finally {
-    if (recorder.state !== "inactive") recorder.stop();
+    if (recorder.state !== "inactive") {
+      try { recorder.stop(); } catch { /* recorder já encerrado pelo navegador */ }
+    }
     for (const track of recorderStream.getTracks()) track.stop();
     for (const track of videoStream.getTracks()) track.stop();
     for (const source of prepared) source.bitmap.close();
     branding.logo?.close();
-    if (soundtrack) await soundtrack.context.close().catch(() => undefined);
+    if (soundtrack) {
+      await withTimeout(soundtrack.context.close(), 2_000, "REEL_AUDIO_CLOSE_TIMEOUT").catch(() => undefined);
+    }
   }
 }
