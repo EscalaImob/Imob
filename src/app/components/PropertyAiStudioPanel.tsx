@@ -4,10 +4,13 @@ import { generatePropertyMarketingText, type AiStudioTextKind, type AiStudioText
 import { listPropertyImages, type PropertyImageItem } from "../../services/propertiesApi";
 import {
   createReelLiteMp4,
+  reelLiteEstimatedDuration,
   reelLiteSupport,
+  type ReelLiteFacts,
   type ReelLiteProgress,
   type ReelLiteResult,
   type ReelLiteSource,
+  type ReelLiteTemplate,
 } from "../ai/reelLite";
 import {
   browserVisionSupport,
@@ -22,6 +25,7 @@ interface Props {
   organizationId: string;
   propertyId: string | null;
   propertyTitle: string;
+  reelFacts: ReelLiteFacts;
   canUpdate: boolean;
   hasUnsavedChanges: boolean;
 }
@@ -163,7 +167,7 @@ function DepthParallaxPreview({ imageUrl, depth }: { imageUrl: string; depth: Pr
   </div>;
 }
 
-export function PropertyAiStudioPanel({ organizationId, propertyId, propertyTitle, canUpdate, hasUnsavedChanges }: Props) {
+export function PropertyAiStudioPanel({ organizationId, propertyId, propertyTitle, reelFacts, canUpdate, hasUnsavedChanges }: Props) {
   const [images, setImages] = useState<PropertyImageItem[]>([]);
   const [loadingImages, setLoadingImages] = useState(Boolean(propertyId));
   const [visionBusy, setVisionBusy] = useState(false);
@@ -179,6 +183,8 @@ export function PropertyAiStudioPanel({ organizationId, propertyId, propertyTitl
   const [reelProgress, setReelProgress] = useState<ReelLiteProgress | null>(null);
   const [reelError, setReelError] = useState<string | null>(null);
   const [reelResult, setReelResult] = useState<(ReelLiteResult & { url: string }) | null>(null);
+  const [reelTemplate, setReelTemplate] = useState<ReelLiteTemplate>("editorial");
+  const [reelSoundtrack, setReelSoundtrack] = useState(true);
   const support = useMemo(() => browserVisionSupport(), []);
   const reelSupport = useMemo(() => reelLiteSupport(), []);
 
@@ -304,7 +310,16 @@ export function PropertyAiStudioPanel({ organizationId, propertyId, propertyTitl
         });
       }
 
-      const result = await createReelLiteMp4(sources, propertyTitle, setReelProgress);
+      const result = await createReelLiteMp4(
+        sources,
+        {
+          title: propertyTitle,
+          template: reelTemplate,
+          soundtrack: reelSoundtrack && reelSupport.audioSupported,
+          facts: reelFacts,
+        },
+        setReelProgress,
+      );
       const url = URL.createObjectURL(result.blob);
       setReelResult({ ...result, url });
       setReelProgress(null);
@@ -387,10 +402,28 @@ export function PropertyAiStudioPanel({ organizationId, propertyId, propertyTitl
       {!reelSupport.supported && <div className="app-inline-error">{reelSupport.reason}</div>}
       {reelError && <div className="app-inline-error">{reelError}</div>}
       {reelProgress && <div className="app-property-uploading"><span className="app-spinner"/>{reelProgress.message}</div>}
+      <div className="app-ai-reel-options">
+        <label>
+          <span>Template visual</span>
+          <select value={reelTemplate} onChange={(event: ChangeEvent<HTMLSelectElement>) => setReelTemplate(event.target.value as ReelLiteTemplate)} disabled={reelBusy}>
+            <option value="editorial">Editorial IMOB</option>
+            <option value="impact">Impacto</option>
+          </select>
+          <small>Aplica títulos animados, ritmo de cena, dados do imóvel e CTA final.</small>
+        </label>
+        <label className={`app-ai-reel-soundtrack${!reelSupport.audioSupported ? " is-disabled" : ""}`}>
+          <span>Trilha original local</span>
+          <span className="app-ai-toggle-row">
+            <input type="checkbox" checked={reelSoundtrack && reelSupport.audioSupported} onChange={(event: ChangeEvent<HTMLInputElement>) => setReelSoundtrack(event.target.checked)} disabled={reelBusy || !reelSupport.audioSupported}/>
+            <strong>{reelSupport.audioSupported ? "Incluir áudio" : "Áudio MP4 indisponível"}</strong>
+          </span>
+          <small>{reelSupport.audioSupported ? "Trilha sintética original, gerada no navegador sem arquivo externo ou licença." : "O Reel continua sendo exportado normalmente sem áudio neste navegador."}</small>
+        </label>
+      </div>
       <div className="app-ai-reel-controls">
         <div>
-          <strong>{Math.min(images.length, 6)} foto(s) no Reel</strong>
-          <span>Ordem da galeria · aproximadamente {Math.max(1, Math.min(images.length, 6)) * 2.7} s · sem custo de API visual</span>
+          <strong>{Math.min(images.length, 6)} foto(s) + CTA final</strong>
+          <span>Ordem da galeria · aproximadamente {reelLiteEstimatedDuration(Math.min(images.length, 6)).toFixed(1)} s · sem custo de API visual</span>
         </div>
         <button type="button" className="app-primary-button" onClick={() => void generateReelLite()} disabled={reelBusy || images.length === 0 || !reelSupport.supported}>
           {reelBusy ? "Gerando MP4..." : reelResult ? "Gerar novamente" : "Gerar Reel Lite MP4"}
@@ -399,11 +432,11 @@ export function PropertyAiStudioPanel({ organizationId, propertyId, propertyTitl
       {reelResult && <div className="app-ai-reel-result">
         <video controls playsInline src={reelResult.url} aria-label="Prévia do Reel Lite gerado"/>
         <div>
-          <div><strong>Reel Lite pronto</strong><span>{reelResult.imageCount} foto(s) · {reelResult.durationSeconds.toFixed(1)} s · 9:16</span></div>
+          <div><strong>Reel Lite pronto</strong><span>{reelResult.imageCount} foto(s) · {reelResult.durationSeconds.toFixed(1)} s · 9:16 · {reelResult.audioIncluded ? "com trilha" : "sem trilha"}</span></div>
           <a className="app-primary-button" href={reelResult.url} download={reelResult.filename}>Baixar MP4</a>
         </div>
       </div>}
-      <p className="app-ai-privacy-note">A exportação acontece localmente no navegador. Nesta primeira versão o vídeo é silencioso; trilha e templates avançados entram depois, sem depender de Kling, Veo ou Pedra.</p>
+      <p className="app-ai-privacy-note">A exportação continua 100% local: imagens, profundidade, template, animações, CTA e trilha opcional são compostos no navegador, sem Kling, Veo ou Pedra.</p>
     </section>
   </div>;
 }

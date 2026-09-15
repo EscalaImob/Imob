@@ -3,15 +3,48 @@ import type { PropertyDepthMap } from "./browserVision";
 const WIDTH = 720;
 const HEIGHT = 1280;
 const FPS = 30;
-const SECONDS_PER_IMAGE = 2.7;
+const SECONDS_PER_IMAGE = 2.35;
+const CTA_SECONDS = 1.9;
 const MAX_IMAGES = 6;
 const VIDEO_BITRATE = 5_000_000;
-const TRANSITION_FRACTION = 0.18;
-const MP4_MIME_TYPES = [
+const AUDIO_BITRATE = 128_000;
+const TRANSITION_FRACTION = 0.20;
+
+const MP4_VIDEO_MIME_TYPES = [
   "video/mp4;codecs=avc1.42E01E",
   "video/mp4;codecs=avc3.42E01E",
   "video/mp4",
 ] as const;
+
+const MP4_AUDIO_MIME_TYPES = [
+  'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
+  'video/mp4;codecs="avc3.42E01E,mp4a.40.2"',
+] as const;
+
+export type ReelLiteTemplate = "editorial" | "impact";
+
+export interface ReelLiteFacts {
+  purpose?: "sale" | "rent" | "sale_rent" | string | null;
+  salePrice?: string | null;
+  rentPrice?: string | null;
+  locationText?: string | null;
+  neighborhood?: string | null;
+  city?: string | null;
+  state?: string | null;
+  bedrooms?: number | null;
+  bathrooms?: number | null;
+  parkingSpaces?: number | null;
+  usefulArea?: string | null;
+  totalArea?: string | null;
+  areaUnit?: string | null;
+}
+
+export interface ReelLiteOptions {
+  title: string;
+  template: ReelLiteTemplate;
+  soundtrack: boolean;
+  facts?: ReelLiteFacts;
+}
 
 export interface ReelLiteSource {
   id: string;
@@ -34,12 +67,50 @@ export interface ReelLiteResult {
   width: number;
   height: number;
   imageCount: number;
+  audioIncluded: boolean;
+  template: ReelLiteTemplate;
+}
+
+export interface ReelLiteSupport {
+  supported: boolean;
+  mimeType: string | null;
+  audioSupported: boolean;
+  audioMimeType: string | null;
+  reason: string | null;
 }
 
 interface PreparedSource extends ReelLiteSource {
   bitmap: ImageBitmap;
   columnDepth: Float32Array | null;
 }
+
+interface TemplatePalette {
+  accent: string;
+  accentSoft: string;
+  headline: string;
+  eyebrow: string;
+}
+
+interface SoundtrackRuntime {
+  context: AudioContext;
+  destination: MediaStreamAudioDestinationNode;
+  start: (durationSeconds: number) => void;
+}
+
+const TEMPLATE_PALETTES: Record<ReelLiteTemplate, TemplatePalette> = {
+  editorial: {
+    accent: "#7c3aed",
+    accentSoft: "rgba(124,58,237,0.28)",
+    headline: "Seu próximo imóvel começa aqui",
+    eyebrow: "ESCALA IMOB · SELEÇÃO",
+  },
+  impact: {
+    accent: "#2f36ff",
+    accentSoft: "rgba(47,54,255,0.30)",
+    headline: "Descubra um novo jeito de morar",
+    eyebrow: "IMÓVEL EM DESTAQUE",
+  },
+};
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -50,24 +121,59 @@ function easeInOut(value: number): number {
   return t < 0.5 ? 2 * t * t : 1 - ((-2 * t + 2) ** 2) / 2;
 }
 
-function mp4MimeType(): string | null {
-  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") return null;
-  return MP4_MIME_TYPES.find((candidate) => MediaRecorder.isTypeSupported(candidate)) ?? null;
+function easeOut(value: number): number {
+  const t = clamp(value, 0, 1);
+  return 1 - (1 - t) ** 3;
 }
 
-export function reelLiteSupport(): { supported: boolean; mimeType: string | null; reason: string | null } {
+function supportedMimeType(candidates: readonly string[]): string | null {
+  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") return null;
+  return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) ?? null;
+}
+
+export function reelLiteSupport(): ReelLiteSupport {
   if (typeof document === "undefined" || typeof MediaRecorder === "undefined") {
-    return { supported: false, mimeType: null, reason: "Este navegador não oferece gravação local de vídeo." };
+    return {
+      supported: false,
+      mimeType: null,
+      audioSupported: false,
+      audioMimeType: null,
+      reason: "Este navegador não oferece gravação local de vídeo.",
+    };
   }
   const canvas = document.createElement("canvas");
   if (typeof canvas.captureStream !== "function") {
-    return { supported: false, mimeType: null, reason: "Este navegador não permite exportar vídeo a partir do canvas." };
+    return {
+      supported: false,
+      mimeType: null,
+      audioSupported: false,
+      audioMimeType: null,
+      reason: "Este navegador não permite exportar vídeo a partir do canvas.",
+    };
   }
-  const mimeType = mp4MimeType();
+  const mimeType = supportedMimeType(MP4_VIDEO_MIME_TYPES);
   if (!mimeType) {
-    return { supported: false, mimeType: null, reason: "A exportação MP4 do MVP requer Chrome, Edge ou Safari atualizado." };
+    return {
+      supported: false,
+      mimeType: null,
+      audioSupported: false,
+      audioMimeType: null,
+      reason: "A exportação MP4 do MVP requer Chrome, Edge ou Safari atualizado.",
+    };
   }
-  return { supported: true, mimeType, reason: null };
+  const audioMimeType = supportedMimeType(MP4_AUDIO_MIME_TYPES);
+  return {
+    supported: true,
+    mimeType,
+    audioSupported: Boolean(audioMimeType && typeof AudioContext !== "undefined"),
+    audioMimeType,
+    reason: null,
+  };
+}
+
+export function reelLiteEstimatedDuration(imageCount: number): number {
+  const count = Math.max(0, Math.min(MAX_IMAGES, imageCount));
+  return count > 0 ? count * SECONDS_PER_IMAGE + CTA_SECONDS : 0;
 }
 
 async function loadBitmap(imageUrl: string): Promise<ImageBitmap> {
@@ -133,17 +239,92 @@ function roundRectPath(context: CanvasRenderingContext2D, x: number, y: number, 
   context.closePath();
 }
 
+function fitText(context: CanvasRenderingContext2D, text: string, maxWidth: number, initialSize: number, minimumSize: number): number {
+  for (let size = initialSize; size >= minimumSize; size -= 2) {
+    context.font = `800 ${size}px Montserrat, Arial, sans-serif`;
+    if (context.measureText(text).width <= maxWidth) return size;
+  }
+  return minimumSize;
+}
+
+function formatCurrency(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return null;
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    maximumFractionDigits: 0,
+  }).format(number);
+}
+
+function reelPrice(facts: ReelLiteFacts | undefined): string | null {
+  if (!facts) return null;
+  const sale = formatCurrency(facts.salePrice);
+  const rent = formatCurrency(facts.rentPrice);
+  if (facts.purpose === "sale_rent") {
+    if (sale && rent) return `Venda ${sale} · Aluguel ${rent}`;
+    return sale ?? rent;
+  }
+  if (facts.purpose === "rent") return rent;
+  return sale ?? rent;
+}
+
+function reelLocation(facts: ReelLiteFacts | undefined): string | null {
+  if (!facts) return null;
+  if (facts.locationText?.trim()) return facts.locationText.trim();
+  const cityState = [facts.city?.trim(), facts.state?.trim()].filter(Boolean).join("/");
+  return [facts.neighborhood?.trim(), cityState].filter(Boolean).join(" · ") || null;
+}
+
+function reelSpecs(facts: ReelLiteFacts | undefined): string[] {
+  if (!facts) return [];
+  const values: string[] = [];
+  const area = facts.usefulArea ?? facts.totalArea;
+  if (area) values.push(`${area} ${facts.areaUnit === "ha" ? "ha" : "m²"}`);
+  if (facts.bedrooms !== null && facts.bedrooms !== undefined) values.push(`${facts.bedrooms} quarto${facts.bedrooms === 1 ? "" : "s"}`);
+  if (facts.bathrooms !== null && facts.bathrooms !== undefined) values.push(`${facts.bathrooms} banheiro${facts.bathrooms === 1 ? "" : "s"}`);
+  if (facts.parkingSpaces !== null && facts.parkingSpaces !== undefined) values.push(`${facts.parkingSpaces} vaga${facts.parkingSpaces === 1 ? "" : "s"}`);
+  return values.slice(0, 3);
+}
+
+function drawPill(
+  context: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  palette: TemplatePalette,
+  alpha = 1,
+): number {
+  context.save();
+  context.globalAlpha *= alpha;
+  context.font = "800 18px Montserrat, Arial, sans-serif";
+  const width = Math.ceil(context.measureText(text).width) + 32;
+  roundRectPath(context, x, y, width, 42, 21);
+  context.fillStyle = palette.accentSoft;
+  context.fill();
+  context.strokeStyle = "rgba(255,255,255,0.24)";
+  context.lineWidth = 1;
+  context.stroke();
+  context.fillStyle = "#ffffff";
+  context.textBaseline = "middle";
+  context.fillText(text, x + 16, y + 21);
+  context.restore();
+  return width;
+}
+
 function drawForeground(
   context: CanvasRenderingContext2D,
   source: PreparedSource,
   progress: number,
+  template: ReelLiteTemplate,
 ): void {
   const { bitmap, columnDepth } = source;
-  const frameX = 32;
-  const frameY = 136;
-  const frameWidth = WIDTH - 64;
-  const frameHeight = 940;
-  const zoom = 1 + 0.035 * easeInOut(progress);
+  const frameX = template === "impact" ? 24 : 32;
+  const frameY = template === "impact" ? 118 : 136;
+  const frameWidth = WIDTH - frameX * 2;
+  const frameHeight = template === "impact" ? 980 : 940;
+  const zoom = 1 + (template === "impact" ? 0.052 : 0.038) * easeInOut(progress);
   const baseScale = Math.min(frameWidth / bitmap.width, frameHeight / bitmap.height) * zoom;
   const drawnWidth = bitmap.width * baseScale;
   const drawnHeight = bitmap.height * baseScale;
@@ -152,23 +333,12 @@ function drawForeground(
   const movement = (easeInOut(progress) - 0.5) * 2;
 
   context.save();
-  roundRectPath(context, frameX, frameY, frameWidth, frameHeight, 22);
+  roundRectPath(context, frameX, frameY, frameWidth, frameHeight, template === "impact" ? 10 : 22);
   context.clip();
 
-  // Preenche a área vertical com a própria foto desfocada, evitando faixas pretas
-  // quando a imagem original é horizontal, sem sacrificar o enquadramento principal.
   context.save();
   context.filter = "blur(24px) brightness(0.52) saturate(0.9)";
-  drawCover(
-    context,
-    bitmap,
-    frameX - 28,
-    frameY - 28,
-    frameWidth + 56,
-    frameHeight + 56,
-    1.08,
-    movement * 0.4,
-  );
+  drawCover(context, bitmap, frameX - 28, frameY - 28, frameWidth + 56, frameHeight + 56, 1.08, movement * 0.4);
   context.restore();
   context.fillStyle = "rgba(5, 8, 16, 0.20)";
   context.fillRect(frameX, frameY, frameWidth, frameHeight);
@@ -183,68 +353,98 @@ function drawForeground(
       const dx = baseX + (column / columns) * drawnWidth;
       const dw = drawnWidth / columns + 2;
       const depth = columnDepth[column] ?? 0.5;
-      const shift = (depth - 0.5) * 34 * movement;
+      const shift = (depth - 0.5) * (template === "impact" ? 42 : 34) * movement;
       context.drawImage(bitmap, sx, 0, sw, bitmap.height, dx + shift, baseY, dw, drawnHeight);
     }
   }
   context.restore();
 
   context.save();
-  roundRectPath(context, frameX, frameY, frameWidth, frameHeight, 22);
+  roundRectPath(context, frameX, frameY, frameWidth, frameHeight, template === "impact" ? 10 : 22);
   context.strokeStyle = "rgba(255,255,255,0.22)";
-  context.lineWidth = 2;
+  context.lineWidth = template === "impact" ? 3 : 2;
   context.stroke();
   context.restore();
 }
 
-function fitText(context: CanvasRenderingContext2D, text: string, maxWidth: number, initialSize: number, minimumSize: number): number {
-  for (let size = initialSize; size >= minimumSize; size -= 2) {
-    context.font = `800 ${size}px Montserrat, Arial, sans-serif`;
-    if (context.measureText(text).width <= maxWidth) return size;
-  }
-  return minimumSize;
-}
-
-function drawOverlay(
+function drawSceneOverlay(
   context: CanvasRenderingContext2D,
-  title: string,
+  options: ReelLiteOptions,
   source: PreparedSource,
+  progress: number,
   imageIndex: number,
   imageCount: number,
 ): void {
+  const palette = TEMPLATE_PALETTES[options.template];
   const gradient = context.createLinearGradient(0, 0, 0, HEIGHT);
-  gradient.addColorStop(0, "rgba(5,8,16,0.78)");
+  gradient.addColorStop(0, options.template === "impact" ? "rgba(5,8,16,0.86)" : "rgba(5,8,16,0.76)");
   gradient.addColorStop(0.18, "rgba(5,8,16,0.02)");
-  gradient.addColorStop(0.75, "rgba(5,8,16,0.05)");
-  gradient.addColorStop(1, "rgba(5,8,16,0.88)");
+  gradient.addColorStop(0.72, "rgba(5,8,16,0.04)");
+  gradient.addColorStop(1, "rgba(5,8,16,0.90)");
   context.fillStyle = gradient;
   context.fillRect(0, 0, WIDTH, HEIGHT);
 
-  context.fillStyle = "#ffffff";
-  const safeTitle = title.trim() || "Imóvel em destaque";
-  const size = fitText(context, safeTitle, WIDTH - 88, 42, 28);
-  context.font = `800 ${size}px Montserrat, Arial, sans-serif`;
+  const entrance = easeOut(Math.min(1, progress / 0.22));
+  const translateY = (1 - entrance) * 22;
+  const alpha = entrance;
+  const safeTitle = options.title.trim() || "Imóvel em destaque";
+
+  context.save();
+  context.globalAlpha = alpha;
+  context.translate(0, translateY);
+  context.fillStyle = palette.accent;
+  context.font = "800 16px Montserrat, Arial, sans-serif";
   context.textBaseline = "top";
-  context.fillText(safeTitle, 44, 42);
+  context.fillText(imageIndex === 0 ? palette.eyebrow : `CENA ${imageIndex + 1} · ${source.label.toUpperCase()}`, 44, 34);
 
+  context.fillStyle = "#ffffff";
+  const size = fitText(context, safeTitle, WIDTH - 88, options.template === "impact" ? 46 : 42, 28);
+  context.font = `800 ${size}px Montserrat, Arial, sans-serif`;
+  context.fillText(safeTitle, 44, 62);
+  context.restore();
+
+  const labelEntrance = easeOut(clamp((progress - 0.08) / 0.25, 0, 1));
+  context.save();
+  context.globalAlpha = labelEntrance;
+  context.translate((1 - labelEntrance) * -18, 0);
+  context.fillStyle = "#ffffff";
   context.font = "800 31px Montserrat, Arial, sans-serif";
-  context.fillText(source.label || "Imóvel", 44, 1110);
-  context.font = "600 20px Montserrat, Arial, sans-serif";
-  context.fillStyle = "rgba(255,255,255,0.78)";
-  context.fillText(`${imageIndex + 1}/${imageCount} · Reel Lite`, 44, 1154);
+  context.textBaseline = "top";
+  context.fillText(source.label || "Imóvel", 44, 1101);
+  context.restore();
 
-  context.font = "800 24px Montserrat, Arial, sans-serif";
+  const specs = reelSpecs(options.facts);
+  if (specs.length) {
+    let x = 44;
+    for (const spec of specs) {
+      const width = drawPill(context, spec, x, 1146, palette, clamp((progress - 0.16) / 0.24, 0, 1));
+      x += width + 8;
+      if (x > WIDTH - 150) break;
+    }
+  } else {
+    context.font = "600 19px Montserrat, Arial, sans-serif";
+    context.fillStyle = "rgba(255,255,255,0.76)";
+    context.fillText(`${imageIndex + 1}/${imageCount} · Reel Lite`, 44, 1154);
+  }
+
+  context.font = "800 22px Montserrat, Arial, sans-serif";
   context.fillStyle = "#ffffff";
   context.textAlign = "right";
-  context.fillText("escala imob", WIDTH - 44, 1198);
+  context.fillText("escala imob", WIDTH - 44, 1204);
   context.textAlign = "left";
+
+  context.fillStyle = palette.accent;
+  const progressWidth = (WIDTH - 88) * ((imageIndex + clamp(progress, 0, 1)) / imageCount);
+  context.fillRect(44, 1244, progressWidth, 5);
+  context.fillStyle = "rgba(255,255,255,0.22)";
+  context.fillRect(44 + progressWidth, 1244, WIDTH - 88 - progressWidth, 5);
 }
 
 function drawScene(
   context: CanvasRenderingContext2D,
   source: PreparedSource,
   progress: number,
-  title: string,
+  options: ReelLiteOptions,
   imageIndex: number,
   imageCount: number,
   clearFirst = true,
@@ -261,9 +461,116 @@ function drawScene(
   drawCover(context, source.bitmap, -60, -60, WIDTH + 120, HEIGHT + 120, 1.08, (progress - 0.5) * 2);
   context.restore();
 
-  drawForeground(context, source, progress);
-  drawOverlay(context, title, source, imageIndex, imageCount);
+  drawForeground(context, source, progress, options.template);
+  drawSceneOverlay(context, options, source, progress, imageIndex, imageCount);
   context.restore();
+}
+
+function drawWrappedCenteredText(
+  context: CanvasRenderingContext2D,
+  text: string,
+  centerX: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number,
+): number {
+  const words = text.trim().split(/\s+/u);
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (context.measureText(candidate).width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  }
+  if (line) lines.push(line);
+  lines.slice(0, 3).forEach((value, index) => context.fillText(value, centerX, y + index * lineHeight));
+  return Math.min(lines.length, 3) * lineHeight;
+}
+
+function drawCtaScene(
+  context: CanvasRenderingContext2D,
+  source: PreparedSource,
+  options: ReelLiteOptions,
+  progress: number,
+): void {
+  const palette = TEMPLATE_PALETTES[options.template];
+  const entrance = easeOut(Math.min(1, progress / 0.34));
+  const pulse = 1 + Math.sin(progress * Math.PI * 5) * 0.012;
+
+  context.clearRect(0, 0, WIDTH, HEIGHT);
+  context.fillStyle = "#070912";
+  context.fillRect(0, 0, WIDTH, HEIGHT);
+  context.save();
+  context.filter = "blur(28px) brightness(0.34) saturate(0.82)";
+  drawCover(context, source.bitmap, -60, -60, WIDTH + 120, HEIGHT + 120, 1.12 + progress * 0.02, 0);
+  context.restore();
+  context.fillStyle = "rgba(4,6,14,0.68)";
+  context.fillRect(0, 0, WIDTH, HEIGHT);
+
+  context.save();
+  context.globalAlpha = entrance;
+  context.translate(0, (1 - entrance) * 36);
+  context.fillStyle = palette.accent;
+  context.font = "800 17px Montserrat, Arial, sans-serif";
+  context.textAlign = "center";
+  context.fillText("ESCALA IMOB", WIDTH / 2, 170);
+
+  const headline = palette.headline;
+  context.fillStyle = "#ffffff";
+  context.font = `800 ${options.template === "impact" ? 56 : 50}px Montserrat, Arial, sans-serif`;
+  context.textBaseline = "top";
+  drawWrappedCenteredText(context, headline, WIDTH / 2, 236, WIDTH - 112, 66);
+
+  const safeTitle = options.title.trim() || "Imóvel em destaque";
+  context.font = "700 26px Montserrat, Arial, sans-serif";
+  context.fillStyle = "rgba(255,255,255,0.84)";
+  drawWrappedCenteredText(context, safeTitle, WIDTH / 2, 430, WIDTH - 130, 38);
+
+  const location = reelLocation(options.facts);
+  const price = reelPrice(options.facts);
+  let infoY = 570;
+  if (location) {
+    context.font = "600 23px Montserrat, Arial, sans-serif";
+    context.fillStyle = "rgba(255,255,255,0.72)";
+    context.fillText(location, WIDTH / 2, infoY);
+    infoY += 46;
+  }
+  if (price) {
+    context.font = "800 34px Montserrat, Arial, sans-serif";
+    context.fillStyle = "#ffffff";
+    context.fillText(price, WIDTH / 2, infoY);
+  }
+
+  context.save();
+  context.translate(WIDTH / 2, 790);
+  context.scale(pulse, pulse);
+  roundRectPath(context, -235, -42, 470, 84, 42);
+  context.fillStyle = palette.accent;
+  context.fill();
+  context.fillStyle = "#ffffff";
+  context.font = "800 26px Montserrat, Arial, sans-serif";
+  context.textBaseline = "middle";
+  context.fillText("Agende uma visita", 0, 0);
+  context.restore();
+
+  context.font = "600 20px Montserrat, Arial, sans-serif";
+  context.fillStyle = "rgba(255,255,255,0.62)";
+  context.fillText("Fale com sua imobiliária e saiba mais.", WIDTH / 2, 870);
+
+  context.fillStyle = palette.accent;
+  context.fillRect(WIDTH / 2 - 48, 1034, 96, 5);
+  context.font = "800 27px Montserrat, Arial, sans-serif";
+  context.fillStyle = "#ffffff";
+  context.fillText("escala imob", WIDTH / 2, 1082);
+  context.font = "600 17px Montserrat, Arial, sans-serif";
+  context.fillStyle = "rgba(255,255,255,0.54)";
+  context.fillText("Reel criado localmente · API visual R$ 0", WIDTH / 2, 1128);
+  context.restore();
+  context.textAlign = "left";
 }
 
 function safeFilename(title: string): string {
@@ -304,9 +611,74 @@ async function prepareSources(
   }
 }
 
+async function createSoundtrackRuntime(): Promise<SoundtrackRuntime> {
+  const context = new AudioContext({ sampleRate: 48_000 });
+  await context.resume();
+  const destination = context.createMediaStreamDestination();
+  const master = context.createGain();
+  master.gain.value = 0.22;
+  master.connect(destination);
+
+  const start = (durationSeconds: number) => {
+    const startAt = context.currentTime + 0.045;
+    const endAt = startAt + durationSeconds;
+    master.gain.cancelScheduledValues(startAt);
+    master.gain.setValueAtTime(0.0001, startAt);
+    master.gain.exponentialRampToValueAtTime(0.22, startAt + 0.18);
+    master.gain.setValueAtTime(0.22, Math.max(startAt + 0.2, endAt - 0.35));
+    master.gain.exponentialRampToValueAtTime(0.0001, endAt);
+
+    const padFrequencies = [130.81, 164.81, 196.0];
+    for (const frequency of padFrequencies) {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.value = frequency;
+      gain.gain.value = 0.055;
+      oscillator.connect(gain);
+      gain.connect(master);
+      oscillator.start(startAt);
+      oscillator.stop(endAt + 0.08);
+    }
+
+    for (let beat = 0; beat < durationSeconds; beat += 0.5) {
+      const when = startAt + beat;
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(92, when);
+      oscillator.frequency.exponentialRampToValueAtTime(54, when + 0.12);
+      gain.gain.setValueAtTime(0.0001, when);
+      gain.gain.exponentialRampToValueAtTime(0.34, when + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.18);
+      oscillator.connect(gain);
+      gain.connect(master);
+      oscillator.start(when);
+      oscillator.stop(when + 0.2);
+    }
+
+    for (let beat = 0.25; beat < durationSeconds; beat += 1) {
+      const when = startAt + beat;
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = "triangle";
+      oscillator.frequency.value = beat % 2 < 1 ? 523.25 : 659.25;
+      gain.gain.setValueAtTime(0.0001, when);
+      gain.gain.exponentialRampToValueAtTime(0.065, when + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.22);
+      oscillator.connect(gain);
+      gain.connect(master);
+      oscillator.start(when);
+      oscillator.stop(when + 0.24);
+    }
+  };
+
+  return { context, destination, start };
+}
+
 export async function createReelLiteMp4(
   sources: ReelLiteSource[],
-  title: string,
+  options: ReelLiteOptions,
   onProgress?: (progress: ReelLiteProgress) => void,
 ): Promise<ReelLiteResult> {
   const support = reelLiteSupport();
@@ -323,12 +695,25 @@ export async function createReelLiteMp4(
     throw new Error("REEL_CANVAS_UNAVAILABLE");
   }
 
-  const stream = canvas.captureStream(FPS);
+  const videoStream = canvas.captureStream(FPS);
+  let soundtrack: SoundtrackRuntime | null = null;
+  const audioIncluded = Boolean(options.soundtrack && support.audioSupported && support.audioMimeType);
+  const recorderStream = new MediaStream(videoStream.getVideoTracks());
+  let recorderMimeType = support.mimeType;
+
+  if (audioIncluded && support.audioMimeType) {
+    soundtrack = await createSoundtrackRuntime();
+    const audioTrack = soundtrack.destination.stream.getAudioTracks()[0];
+    if (audioTrack) recorderStream.addTrack(audioTrack);
+    recorderMimeType = support.audioMimeType;
+  }
+
   const chunks: BlobPart[] = [];
   let recorderError: Error | null = null;
-  const recorder = new MediaRecorder(stream, {
-    mimeType: support.mimeType,
+  const recorder = new MediaRecorder(recorderStream, {
+    mimeType: recorderMimeType,
     videoBitsPerSecond: VIDEO_BITRATE,
+    ...(audioIncluded ? { audioBitsPerSecond: AUDIO_BITRATE } : {}),
   });
   recorder.addEventListener("dataavailable", (event) => {
     if (event.data.size > 0) chunks.push(event.data);
@@ -338,41 +723,44 @@ export async function createReelLiteMp4(
     recorderError = candidate.error ?? new Error("REEL_RECORDER_ERROR");
   });
 
-  const durationSeconds = prepared.length * SECONDS_PER_IMAGE;
+  const scenesDuration = prepared.length * SECONDS_PER_IMAGE;
+  const durationSeconds = scenesDuration + CTA_SECONDS;
   const stopped = new Promise<void>((resolve) => recorder.addEventListener("stop", () => resolve(), { once: true }));
   let lastReported = -1;
 
   try {
-    drawScene(context, prepared[0]!, 0, title, 0, prepared.length);
+    drawScene(context, prepared[0]!, 0, options, 0, prepared.length);
     recorder.start(750);
+    soundtrack?.start(durationSeconds);
     const startedAt = performance.now();
 
     await new Promise<void>((resolve) => {
       const render = (now: number) => {
         const elapsed = Math.min(durationSeconds, (now - startedAt) / 1000);
-        const rawIndex = Math.min(prepared.length - 1, Math.floor(elapsed / SECONDS_PER_IMAGE));
-        const sceneStart = rawIndex * SECONDS_PER_IMAGE;
-        const sceneProgress = clamp((elapsed - sceneStart) / SECONDS_PER_IMAGE, 0, 1);
-        drawScene(context, prepared[rawIndex]!, sceneProgress, title, rawIndex, prepared.length);
 
-        // Faz crossfade direto entre cenas. Além de ficar mais fluido, isso evita
-        // quadros totalmente pretos no início e nas trocas de foto.
-        if (rawIndex < prepared.length - 1 && sceneProgress > 1 - TRANSITION_FRACTION) {
-          const transitionProgress = easeInOut(
-            (sceneProgress - (1 - TRANSITION_FRACTION)) / TRANSITION_FRACTION,
-          );
-          context.save();
-          context.globalAlpha = transitionProgress;
-          drawScene(
-            context,
-            prepared[rawIndex + 1]!,
-            transitionProgress * 0.12,
-            title,
-            rawIndex + 1,
-            prepared.length,
-            false,
-          );
-          context.restore();
+        if (elapsed < scenesDuration) {
+          const rawIndex = Math.min(prepared.length - 1, Math.floor(elapsed / SECONDS_PER_IMAGE));
+          const sceneStart = rawIndex * SECONDS_PER_IMAGE;
+          const sceneProgress = clamp((elapsed - sceneStart) / SECONDS_PER_IMAGE, 0, 1);
+          drawScene(context, prepared[rawIndex]!, sceneProgress, options, rawIndex, prepared.length);
+
+          if (rawIndex < prepared.length - 1 && sceneProgress > 1 - TRANSITION_FRACTION) {
+            const transitionProgress = easeInOut((sceneProgress - (1 - TRANSITION_FRACTION)) / TRANSITION_FRACTION);
+            context.save();
+            context.globalAlpha = transitionProgress;
+            drawScene(
+              context,
+              prepared[rawIndex + 1]!,
+              transitionProgress * 0.14,
+              options,
+              rawIndex + 1,
+              prepared.length,
+              false,
+            );
+            context.restore();
+          }
+        } else {
+          drawCtaScene(context, prepared[prepared.length - 1]!, options, (elapsed - scenesDuration) / CTA_SECONDS);
         }
 
         const percent = Math.min(100, Math.floor((elapsed / durationSeconds) * 100));
@@ -393,20 +781,24 @@ export async function createReelLiteMp4(
     recorder.stop();
     await stopped;
     if (recorderError) throw recorderError;
-    const blob = new Blob(chunks, { type: support.mimeType });
+    const blob = new Blob(chunks, { type: recorderMimeType });
     if (blob.size === 0) throw new Error("REEL_EMPTY_OUTPUT");
     return {
       blob,
-      filename: safeFilename(title),
-      mimeType: support.mimeType,
+      filename: safeFilename(options.title),
+      mimeType: recorderMimeType,
       durationSeconds,
       width: WIDTH,
       height: HEIGHT,
       imageCount: prepared.length,
+      audioIncluded,
+      template: options.template,
     };
   } finally {
     if (recorder.state !== "inactive") recorder.stop();
-    for (const track of stream.getTracks()) track.stop();
+    for (const track of recorderStream.getTracks()) track.stop();
+    for (const track of videoStream.getTracks()) track.stop();
     for (const source of prepared) source.bitmap.close();
+    if (soundtrack) await soundtrack.context.close().catch(() => undefined);
   }
 }
