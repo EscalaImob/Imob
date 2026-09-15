@@ -39,6 +39,36 @@ export interface AiStudioRuntime {
   quota: AiStudioQuota;
 }
 
+
+export interface AiStudioReelAssetMetadata {
+  generationId: string;
+  originalName: string;
+  contentType: string;
+  sizeBytes: number;
+  durationSeconds: number;
+  width: number;
+  height: number;
+  template: AiStudioReelTemplate;
+  audioIncluded: boolean;
+  imageIds: string[];
+}
+
+export interface AiStudioReelAssetUpload {
+  assetId: string;
+  uploadUrl: string;
+  expiresInSeconds: number;
+  requiredHeaders: { "content-type": string };
+}
+
+export interface AiStudioReelAsset extends AiStudioReelAssetMetadata {
+  id: string;
+  propertyId: string;
+  viewUrl: string;
+  downloadUrl: string;
+  urlExpiresInSeconds: number;
+  createdAt: string;
+}
+
 export interface AiStudioReelUsageInput {
   generationId: string;
   template: AiStudioReelTemplate;
@@ -112,5 +142,53 @@ export async function generatePropertyMarketingText(
   return aiStudioRequest(organizationId, `/portfolio/properties/${encodeURIComponent(propertyId)}/ai/text`, {
     method: "POST",
     body: JSON.stringify({ kind }),
+  });
+}
+
+
+export async function listAiStudioReelAssets(organizationId: string, propertyId: string): Promise<AiStudioReelAsset[]> {
+  return aiStudioRequest(organizationId, `/portfolio/properties/${encodeURIComponent(propertyId)}/ai/reel-assets`);
+}
+
+export async function createAiStudioReelAssetUpload(
+  organizationId: string,
+  propertyId: string,
+  metadata: AiStudioReelAssetMetadata,
+): Promise<AiStudioReelAssetUpload> {
+  return aiStudioRequest(organizationId, `/portfolio/properties/${encodeURIComponent(propertyId)}/ai/reel-assets/upload`, {
+    method: "POST",
+    body: JSON.stringify(metadata),
+  });
+}
+
+export async function uploadAiStudioReelFile(upload: AiStudioReelAssetUpload, blob: Blob): Promise<void> {
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort(), 90_000);
+  try {
+    const response = await fetch(upload.uploadUrl, {
+      method: "PUT",
+      headers: { "content-type": upload.requiredHeaders["content-type"] },
+      body: blob,
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new AppApiError("Não foi possível enviar o Reel para o armazenamento privado.", "REEL_ASSET_UPLOAD_FAILED", response.status);
+  } catch (error) {
+    if (error instanceof AppApiError) throw error;
+    if (error instanceof DOMException && error.name === "AbortError") throw new AppApiError("O envio do Reel demorou mais que o esperado.", "REEL_ASSET_UPLOAD_TIMEOUT");
+    throw new AppApiError("Não foi possível enviar o Reel. Verifique sua conexão e tente novamente.", "REEL_ASSET_UPLOAD_NETWORK_ERROR");
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
+}
+
+export async function confirmAiStudioReelAsset(
+  organizationId: string,
+  propertyId: string,
+  assetId: string,
+  metadata: AiStudioReelAssetMetadata,
+): Promise<AiStudioReelAsset> {
+  return aiStudioRequest(organizationId, `/portfolio/properties/${encodeURIComponent(propertyId)}/ai/reel-assets/${encodeURIComponent(assetId)}/confirm`, {
+    method: "POST",
+    body: JSON.stringify(metadata),
   });
 }

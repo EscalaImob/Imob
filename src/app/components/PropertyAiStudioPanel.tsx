@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { AppApiError } from "../../services/appApi";
 import {
+  confirmAiStudioReelAsset,
+  createAiStudioReelAssetUpload,
   generatePropertyMarketingText,
   getAiStudioRuntime,
+  listAiStudioReelAssets,
   recordAiStudioReelUsage,
+  uploadAiStudioReelFile,
+  type AiStudioReelAsset,
+  type AiStudioReelAssetMetadata,
   type AiStudioRuntime,
   type AiStudioTextKind,
   type AiStudioTextResult,
@@ -220,7 +226,7 @@ export function PropertyAiStudioPanel({
   const [reelBusy, setReelBusy] = useState(false);
   const [reelProgress, setReelProgress] = useState<ReelLiteProgress | null>(null);
   const [reelError, setReelError] = useState<string | null>(null);
-  const [reelResult, setReelResult] = useState<(ReelLiteResult & { url: string }) | null>(null);
+  const [reelResult, setReelResult] = useState<(ReelLiteResult & { url: string; generationId: string; imageIds: string[]; usageRecorded: boolean }) | null>(null);
   const [reelTemplate, setReelTemplate] = useState<ReelLiteTemplate>("editorial");
   const [reelSoundtrack, setReelSoundtrack] = useState(true);
   const [reelUseOrganizationBrand, setReelUseOrganizationBrand] = useState(true);
@@ -234,6 +240,10 @@ export function PropertyAiStudioPanel({
   const [aiRuntimeLoading, setAiRuntimeLoading] = useState(Boolean(propertyId && canUpdate));
   const [aiRuntimeError, setAiRuntimeError] = useState<string | null>(null);
   const [reelUsageWarning, setReelUsageWarning] = useState<string | null>(null);
+  const [reelAssets, setReelAssets] = useState<AiStudioReelAsset[]>([]);
+  const [reelAssetsLoading, setReelAssetsLoading] = useState(Boolean(propertyId && canUpdate));
+  const [reelAssetSaving, setReelAssetSaving] = useState(false);
+  const [reelAssetError, setReelAssetError] = useState<string | null>(null);
   const runtimeDefaultsAppliedRef = useRef<string | null>(null);
   const reelDepthCacheRef = useRef<Map<string, PropertyDepthMap>>(new Map());
   const support = useMemo(() => browserVisionSupport(), []);
@@ -263,11 +273,31 @@ export function PropertyAiStudioPanel({
 
   useEffect(() => { void loadImages(); }, [loadImages]);
 
+  const loadReelAssets = useCallback(async () => {
+    if (!propertyId || !canUpdate) {
+      setReelAssets([]);
+      setReelAssetsLoading(false);
+      return;
+    }
+    setReelAssetsLoading(true);
+    try {
+      setReelAssets(await listAiStudioReelAssets(organizationId, propertyId));
+      setReelAssetError(null);
+    } catch (error) {
+      setReelAssetError(error instanceof AppApiError ? error.message : "Não foi possível carregar os Reels salvos.");
+    } finally {
+      setReelAssetsLoading(false);
+    }
+  }, [canUpdate, organizationId, propertyId]);
+
+  useEffect(() => { void loadReelAssets(); }, [loadReelAssets]);
+
   useEffect(() => {
     reelDepthCacheRef.current.clear();
     setDepth(null);
     setAnalysis({});
     setVisionError(null);
+    setReelAssetError(null);
   }, [organizationId, propertyId]);
 
   useEffect(() => {
@@ -424,6 +454,7 @@ export function PropertyAiStudioPanel({
         });
       }
 
+      const generationId = globalThis.crypto.randomUUID();
       const result = await createReelLiteMp4(
         sources,
         {
@@ -447,16 +478,18 @@ export function PropertyAiStudioPanel({
         setReelProgress,
       );
       const url = URL.createObjectURL(result.blob);
-      setReelResult({ ...result, url });
+      setReelResult({ ...result, url, generationId, imageIds: selected.map((image) => image.id), usageRecorded: false });
       setReelProgress(null);
       try {
         const updatedRuntime = await recordAiStudioReelUsage(organizationId, propertyId, {
-          generationId: globalThis.crypto.randomUUID(),
+          generationId,
           template: reelTemplate,
           audioIncluded: result.audioIncluded,
           imageCount: result.imageCount,
         });
         setAiRuntime(updatedRuntime);
+        setReelResult((current) => current?.generationId === generationId ? { ...current, usageRecorded: true } : current);
+        setReelUsageWarning(null);
       } catch (usageError) {
         console.warn("[Estúdio IMOB] Reel gerado, mas o consumo comercial não pôde ser registrado", usageError);
         setReelUsageWarning(
@@ -479,6 +512,38 @@ export function PropertyAiStudioPanel({
     }
   }
 
+  async function saveGeneratedReel() {
+    if (!propertyId || !reelResult || reelAssetSaving) return;
+    if (!reelResult.usageRecorded) {
+      setReelAssetError("A geração ainda não foi registrada. Gere o Reel novamente antes de salvá-lo no Estúdio.");
+      return;
+    }
+    setReelAssetSaving(true);
+    setReelAssetError(null);
+    try {
+      const metadata: AiStudioReelAssetMetadata = {
+        generationId: reelResult.generationId,
+        originalName: reelResult.filename,
+        contentType: reelResult.mimeType,
+        sizeBytes: reelResult.blob.size,
+        durationSeconds: reelResult.durationSeconds,
+        width: reelResult.width,
+        height: reelResult.height,
+        template: reelResult.template,
+        audioIncluded: reelResult.audioIncluded,
+        imageIds: reelResult.imageIds,
+      };
+      const upload = await createAiStudioReelAssetUpload(organizationId, propertyId, metadata);
+      await uploadAiStudioReelFile(upload, reelResult.blob);
+      const saved = await confirmAiStudioReelAsset(organizationId, propertyId, upload.assetId, metadata);
+      setReelAssets((current) => [saved, ...current.filter((item) => item.id !== saved.id && item.generationId !== saved.generationId)].slice(0, 12));
+    } catch (error) {
+      setReelAssetError(error instanceof AppApiError ? error.message : "Não foi possível salvar o Reel no armazenamento privado.");
+    } finally {
+      setReelAssetSaving(false);
+    }
+  }
+
   async function generateText(kind: AiStudioTextKind) {
     if (!propertyId || textBusy || !canUpdate || aiRuntimeLoading || aiRuntimeError) return;
     setTextBusy(kind);
@@ -498,6 +563,7 @@ export function PropertyAiStudioPanel({
 
   const selectedDepthImage = images.find((item) => item.id === depthImageId) ?? null;
   const progressText = progressLabel(visionProgress);
+  const savedCurrentReel = reelResult ? reelAssets.find((item) => item.generationId === reelResult.generationId) ?? null : null;
 
   return <div className="app-ai-studio">
     <section className="app-ai-hero">
@@ -645,9 +711,17 @@ export function PropertyAiStudioPanel({
         <video controls playsInline src={reelResult.url} aria-label="Prévia do Reel Lite gerado"/>
         <div>
           <div><strong>Reel Lite pronto</strong><span>{reelResult.imageCount} foto(s) · {reelResult.durationSeconds.toFixed(1)} s · 9:16 · {reelResult.audioIncluded ? "com trilha" : "sem trilha"}</span></div>
-          <a className="app-primary-button" href={reelResult.url} download={reelResult.filename}>Baixar MP4</a>
+          <div className="app-ai-reel-result-actions">
+            <a className="app-secondary-button" href={reelResult.url} download={reelResult.filename}>Baixar MP4</a>
+            <button type="button" className="app-primary-button" onClick={() => void saveGeneratedReel()} disabled={reelAssetSaving || Boolean(savedCurrentReel) || !reelResult.usageRecorded}>{savedCurrentReel ? "Salvo no Estúdio" : reelAssetSaving ? "Salvando..." : !reelResult.usageRecorded ? "Registro pendente" : "Salvar no Estúdio"}</button>
+          </div>
         </div>
       </div>}
+      {reelAssetError && <div className="app-inline-error">{reelAssetError}</div>}
+      <div className="app-ai-reel-library">
+        <div className="app-section-title-row"><div><strong>Reels salvos</strong><p className="app-form-help">Os vídeos confirmados ficam no armazenamento privado da organização e poderão ser vinculados às Publicações na próxima etapa.</p></div>{reelAssets.length > 0 && <span className="app-ai-runtime-badge">{reelAssets.length} salvo(s)</span>}</div>
+        {reelAssetsLoading ? <div className="app-table-empty"><span className="app-spinner"/>Carregando Reels salvos...</div> : reelAssets.length === 0 ? <div className="app-soft-empty">Nenhum Reel foi salvo neste imóvel ainda.</div> : <div className="app-ai-reel-library-grid">{reelAssets.slice(0, 6).map((asset) => <article key={asset.id}><video controls playsInline preload="metadata" src={asset.viewUrl}/><div><strong>{asset.originalName}</strong><span>{asset.durationSeconds.toFixed(1)} s · {asset.width} × {asset.height} · {asset.audioIncluded ? "com trilha" : "sem trilha"}</span><a className="app-secondary-button" href={asset.downloadUrl}>Baixar</a></div></article>)}</div>}
+      </div>
       <p className="app-ai-privacy-note">A exportação continua 100% local: imagens, profundidade, template, animações, CTA e trilha opcional são compostos no navegador, sem Kling, Veo ou Pedra.</p>
     </section>
   </div>;
