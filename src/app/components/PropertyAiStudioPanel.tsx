@@ -6,6 +6,7 @@ import {
   browserVisionSupport,
   classifyPropertyPhoto,
   estimatePropertyPhotoDepth,
+  resetBrowserVisionWorker,
   type PropertyDepthMap,
   type PropertyPhotoClassification,
 } from "../ai/browserVision";
@@ -26,9 +27,6 @@ const textActions: Array<{ kind: AiStudioTextKind; label: string; description: s
   { kind: "cta", label: "CTA", description: "Chamada curta para contato ou visita." },
 ];
 
-function confidenceLabel(value: number): string {
-  return `${Math.round(value * 100)}%`;
-}
 
 function progressLabel(progress: { status: string | null; progress: number | null; file: string | null } | null): string | null {
   if (!progress) return null;
@@ -167,19 +165,29 @@ export function PropertyAiStudioPanel({ organizationId, propertyId, canUpdate, h
   useEffect(() => { void loadImages(); }, [loadImages]);
 
   async function analyzePhotos() {
-    if (!support.supported || visionBusy || images.length === 0) return;
+    if (!support.supported || visionBusy || images.length === 0 || !propertyId) return;
     setVisionBusy(true);
     setVisionError(null);
     setVisionProgress(null);
     try {
-      const next: AnalysisByImage = { ...analysis };
-      for (const image of images) {
-        if (next[image.id]) continue;
-        next[image.id] = await classifyPropertyPhoto(image.viewUrl, setVisionProgress);
+      // Renova as URLs temporárias antes da análise. Isso evita exigir que o usuário
+      // remova e envie novamente uma foto quando uma URL assinada estiver vencida.
+      const freshImages = await listPropertyImages(organizationId, propertyId);
+      setImages(freshImages);
+      const next: AnalysisByImage = {};
+      for (const image of freshImages) {
+        try {
+          next[image.id] = await classifyPropertyPhoto(image.viewUrl, setVisionProgress);
+        } catch {
+          // Uma primeira carga do runtime/modelo pode falhar por cache/CDN. Reinicia o
+          // worker e tenta a mesma foto mais uma vez, sem exigir qualquer ação manual.
+          resetBrowserVisionWorker();
+          next[image.id] = await classifyPropertyPhoto(image.viewUrl, setVisionProgress);
+        }
         setAnalysis({ ...next });
       }
     } catch {
-      setVisionError("Não foi possível concluir a análise local. Verifique a conexão na primeira carga do modelo e tente novamente.");
+      setVisionError("Não foi possível concluir a análise local. Tente novamente; não é necessário remover ou reenviar a imagem.");
     } finally {
       setVisionBusy(false);
       setVisionProgress(null);
@@ -238,7 +246,7 @@ export function PropertyAiStudioPanel({ organizationId, propertyId, canUpdate, h
       {visionError && <div className="app-inline-error">{visionError}</div>}
       {loadingImages ? <div className="app-table-empty"><span className="app-spinner"/>Carregando imagens...</div> : images.length === 0 ? <div className="app-soft-empty">Adicione fotos na aba Imagens antes de usar a análise local.</div> : <div className="app-ai-photo-grid">{images.map((image) => {
         const result = analysis[image.id];
-        return <article key={image.id}><img src={image.viewUrl} alt={image.originalName}/><div><strong>{result?.label ?? "Ainda não analisada"}</strong>{result ? <span>{confidenceLabel(result.confidence)} de confiança relativa</span> : <span>{image.primary ? "Foto principal" : `Posição ${image.sortOrder + 1}`}</span>}</div></article>;
+        return <article key={image.id}><img src={image.viewUrl} alt={image.originalName}/><div><strong>{result?.label ?? "Ainda não analisada"}</strong>{result ? <span>Classificação automática</span> : <span>{image.primary ? "Foto principal" : `Posição ${image.sortOrder + 1}`}</span>}</div></article>;
       })}</div>}
       <p className="app-ai-privacy-note">As fotos são processadas localmente pelo Transformers.js. Nenhum token da Hugging Face é usado no MVP.</p>
     </section>

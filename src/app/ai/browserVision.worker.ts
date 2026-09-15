@@ -28,7 +28,7 @@ const TRANSFORMERS_ESM = "https://cdn.jsdelivr.net/npm/@huggingface/transformers
 const CLASSIFICATION_MODEL = "Xenova/siglip-base-patch16-224";
 const DEPTH_MODEL = "onnx-community/depth-anything-v2-small";
 const labels = [
-  "the exterior facade of a residential property",
+  "the front exterior facade of a house or residential building",
   "the interior of a living room",
   "the interior of a kitchen",
   "the interior of a bedroom",
@@ -36,7 +36,6 @@ const labels = [
   "a balcony or terrace of a residential property",
   "a residential leisure area with a pool, gym, or barbecue",
   "an outdoor yard, garden, or patio of a residential property",
-  "another type of real estate photo",
 ];
 
 let transformersPromise: Promise<TransformersModule> | null = null;

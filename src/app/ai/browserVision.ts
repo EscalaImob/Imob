@@ -35,7 +35,7 @@ interface PendingRequest<T> {
 }
 
 const labelMap: Record<string, { category: PropertyPhotoCategory; label: string }> = {
-  "the exterior facade of a residential property": { category: "facade", label: "Fachada" },
+  "the front exterior facade of a house or residential building": { category: "facade", label: "Fachada" },
   "the interior of a living room": { category: "living_room", label: "Sala" },
   "the interior of a kitchen": { category: "kitchen", label: "Cozinha" },
   "the interior of a bedroom": { category: "bedroom", label: "Quarto" },
@@ -43,7 +43,6 @@ const labelMap: Record<string, { category: PropertyPhotoCategory; label: string 
   "a balcony or terrace of a residential property": { category: "balcony", label: "Varanda / terraço" },
   "a residential leisure area with a pool, gym, or barbecue": { category: "leisure", label: "Área de lazer" },
   "an outdoor yard, garden, or patio of a residential property": { category: "outdoor", label: "Área externa" },
-  "another type of real estate photo": { category: "other", label: "Outros" },
 };
 
 let worker: Worker | null = null;
@@ -104,6 +103,13 @@ function request<T>(
     pending.set(id, { resolve: resolve as (value: unknown) => void, reject, onProgress });
     visionWorker().postMessage({ ...payload, id });
   });
+}
+
+export function resetBrowserVisionWorker(): void {
+  for (const request of pending.values()) request.reject(new Error("VISION_WORKER_RESET"));
+  pending.clear();
+  worker?.terminate();
+  worker = null;
 }
 
 export async function classifyPropertyPhoto(
