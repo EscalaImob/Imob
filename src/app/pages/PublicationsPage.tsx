@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppApiError } from "../../services/appApi";
 import {
+  listAiStudioReelAssets,
+  type AiStudioReelAsset,
+} from "../../services/aiStudioApi";
+import {
   createPublication,
   getPublicationOptions,
   listPublications,
@@ -40,6 +44,7 @@ const formatLabels: Record<PortfolioPublicationFormat, string> = {
   story: "Story",
   carousel: "Carrossel",
   banner: "Banner",
+  reel: "Reel",
 };
 const objectiveLabels: Record<PortfolioPublicationObjective, string> = {
   sell: "Venda",
@@ -89,6 +94,7 @@ function emptyFields(property?: PublicationPropertyOption): PublicationFields {
     campaignName: null,
     trackingLink: null,
     scheduledAt: null,
+    mediaAssetId: null,
   };
 }
 function PublicationModal({
@@ -96,6 +102,7 @@ function PublicationModal({
   options,
   item,
   initialPropertyId,
+  initialMediaAssetId,
   canWrite,
   onClose,
   onSaved,
@@ -104,6 +111,7 @@ function PublicationModal({
   options: PublicationOptions;
   item: PublicationListItem | null;
   initialPropertyId: string;
+  initialMediaAssetId: string;
   canWrite: boolean;
   onClose: () => void;
   onSaved: () => void;
@@ -126,17 +134,58 @@ function PublicationModal({
           campaignName: item.campaignName,
           trackingLink: item.trackingLink,
           scheduledAt: item.scheduledAt,
+          mediaAssetId: item.mediaAssetId,
         }
-      : emptyFields(initialProperty),
+      : {
+          ...emptyFields(initialProperty),
+          ...(initialMediaAssetId
+            ? { format: "reel" as const, mediaAssetId: initialMediaAssetId }
+            : {}),
+        },
   );
   const [hashtagText, setHashtagText] = useState(() =>
     draft.hashtags.join(" "),
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reelAssets, setReelAssets] = useState<AiStudioReelAsset[]>([]);
+  const [reelAssetsLoading, setReelAssetsLoading] = useState(false);
+  const [reelAssetsError, setReelAssetsError] = useState<string | null>(null);
   const property =
     options.properties.find((candidate) => candidate.id === draft.propertyId) ??
     null;
+  useEffect(() => {
+    if (draft.format !== "reel" || !draft.propertyId) {
+      setReelAssets([]);
+      setReelAssetsError(null);
+      setReelAssetsLoading(false);
+      return;
+    }
+    let active = true;
+    setReelAssetsLoading(true);
+    setReelAssetsError(null);
+    void listAiStudioReelAssets(organizationId, draft.propertyId)
+      .then((assets) => {
+        if (active) setReelAssets(assets);
+      })
+      .catch((loadError) => {
+        if (!active) return;
+        setReelAssets([]);
+        setReelAssetsError(
+          loadError instanceof AppApiError
+            ? loadError.message
+            : "Não foi possível carregar os Reels salvos deste imóvel.",
+        );
+      })
+      .finally(() => {
+        if (active) setReelAssetsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [organizationId, draft.format, draft.propertyId]);
+  const selectedReelAsset =
+    reelAssets.find((asset) => asset.id === draft.mediaAssetId) ?? null;
   const terminal = item?.status === "published" || item?.status === "canceled";
   const allowedStatuses = item
     ? transitions[item.status]
@@ -162,6 +211,13 @@ function PublicationModal({
       format: current.format,
     }));
     setHashtagText(next.defaults.hashtags.join(" "));
+  }
+  function chooseFormat(format: PortfolioPublicationFormat) {
+    setDraft((current) => ({
+      ...current,
+      format,
+      mediaAssetId: format === "reel" ? current.mediaAssetId : null,
+    }));
   }
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -290,10 +346,7 @@ function PublicationModal({
                 value={draft.format}
                 disabled={terminal}
                 onChange={(event) =>
-                  set(
-                    "format",
-                    event.target.value as PortfolioPublicationFormat,
-                  )
+                  chooseFormat(event.target.value as PortfolioPublicationFormat)
                 }
               >
                 {Object.entries(formatLabels).map(([value, label]) => (
@@ -303,6 +356,79 @@ function PublicationModal({
                 ))}
               </select>
             </label>
+            {draft.format === "reel" && (
+              <div className="app-publication-reel-picker is-wide">
+                <div className="app-publication-reel-picker__header">
+                  <div>
+                    <strong>Reel salvo do Estúdio IA *</strong>
+                    <span>
+                      O vídeo fica vinculado a esta publicação sem duplicar o
+                      arquivo no armazenamento.
+                    </span>
+                  </div>
+                  {reelAssetsLoading && <span className="app-spinner" />}
+                </div>
+                {reelAssetsError && (
+                  <div className="app-inline-error">{reelAssetsError}</div>
+                )}
+                {!reelAssetsLoading && !reelAssetsError && reelAssets.length === 0 && !draft.mediaAssetId && (
+                  <div className="app-soft-empty">
+                    Nenhum Reel salvo neste imóvel. Gere e salve um vídeo na aba
+                    Estúdio IA antes de criar uma publicação em formato Reel.
+                  </div>
+                )}
+                {(reelAssets.length > 0 || draft.mediaAssetId) && (
+                  <label>
+                    <span>Vídeo *</span>
+                    <select
+                      value={draft.mediaAssetId ?? ""}
+                      disabled={terminal || reelAssetsLoading}
+                      onChange={(event) =>
+                        set("mediaAssetId", event.target.value || null)
+                      }
+                    >
+                      <option value="">Selecione um Reel salvo</option>
+                      {draft.mediaAssetId &&
+                        !reelAssets.some((asset) => asset.id === draft.mediaAssetId) && (
+                          <option value={draft.mediaAssetId}>
+                            Reel vinculado atualmente
+                          </option>
+                        )}
+                      {reelAssets.map((asset) => (
+                        <option key={asset.id} value={asset.id}>
+                          {asset.originalName} · {asset.durationSeconds.toFixed(1)} s
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {selectedReelAsset && (
+                  <div className="app-publication-reel-preview">
+                    <video
+                      controls
+                      playsInline
+                      preload="metadata"
+                      src={selectedReelAsset.viewUrl}
+                      aria-label="Prévia do Reel vinculado à publicação"
+                    />
+                    <div>
+                      <strong>{selectedReelAsset.originalName}</strong>
+                      <span>
+                        {selectedReelAsset.durationSeconds.toFixed(1)} s ·{" "}
+                        {selectedReelAsset.width} × {selectedReelAsset.height} ·{" "}
+                        {selectedReelAsset.audioIncluded ? "com trilha" : "sem trilha"}
+                      </span>
+                      <a
+                        className="app-secondary-button"
+                        href={selectedReelAsset.downloadUrl}
+                      >
+                        Baixar MP4
+                      </a>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <label>
               <span>Status *</span>
               <select
@@ -425,7 +551,8 @@ function PublicationModal({
                   !draft.title.trim() ||
                   !draft.caption.trim() ||
                   (requiresReadiness && !property?.readiness.ready) ||
-                  (draft.status === "scheduled" && !draft.scheduledAt)
+                  (draft.status === "scheduled" && !draft.scheduledAt) ||
+                  (draft.format === "reel" && !draft.mediaAssetId)
                 }
               >
                 {saving
@@ -446,9 +573,9 @@ export function PublicationsPage({
   canCreate,
   canUpdate,
 }: Props) {
-  const initialPropertyId =
-    new URLSearchParams(globalThis.location.search).get("propertyId")?.trim() ||
-    "";
+  const initialParams = new URLSearchParams(globalThis.location.search);
+  const initialPropertyId = initialParams.get("propertyId")?.trim() || "";
+  const initialMediaAssetId = initialParams.get("mediaAssetId")?.trim() || "";
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<PortfolioPublicationStatus | "">("");
   const [channel, setChannel] = useState<PortfolioPublicationChannel | "">("");
@@ -459,7 +586,7 @@ export function PublicationsPage({
   const [error, setError] = useState<string | null>(null);
   const [modalItem, setModalItem] = useState<
     PublicationListItem | "new" | null
-  >(null);
+  >(initialMediaAssetId ? "new" : null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const query = useMemo(
     () => ({
@@ -533,6 +660,7 @@ export function PublicationsPage({
         campaignName: item.campaignName,
         trackingLink: item.trackingLink,
         scheduledAt: null,
+        mediaAssetId: item.mediaAssetId,
       });
       load();
     } catch (removeError) {
@@ -787,6 +915,7 @@ export function PublicationsPage({
           options={options}
           item={itemForModal}
           initialPropertyId={initialPropertyId}
+          initialMediaAssetId={initialMediaAssetId}
           canWrite={modalItem === "new" ? canCreate : canUpdate}
           onClose={() => setModalItem(null)}
           onSaved={() => {
