@@ -2057,6 +2057,9 @@ export function App() {
             canReadProperties ? (
               <PropertyEditorPage
                 organizationId={activeOrganization.id}
+                organizationName={activeOrganization.name}
+                organizationLogoUrl={activeOrganization.logoUrl}
+                currentUserName={bootstrap.user.displayName}
                 canCreate={canCreateProperty}
                 canUpdate={canUpdateProperty}
                 canReadAuthorizations={canReadAuthorizations}

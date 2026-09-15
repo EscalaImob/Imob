@@ -23,6 +23,9 @@ import {
 
 interface Props {
   organizationId: string;
+  organizationName: string;
+  organizationLogoUrl: string | null;
+  currentUserName: string;
   propertyId: string | null;
   propertyTitle: string;
   reelFacts: ReelLiteFacts;
@@ -167,7 +170,17 @@ function DepthParallaxPreview({ imageUrl, depth }: { imageUrl: string; depth: Pr
   </div>;
 }
 
-export function PropertyAiStudioPanel({ organizationId, propertyId, propertyTitle, reelFacts, canUpdate, hasUnsavedChanges }: Props) {
+export function PropertyAiStudioPanel({
+  organizationId,
+  organizationName,
+  organizationLogoUrl,
+  currentUserName,
+  propertyId,
+  propertyTitle,
+  reelFacts,
+  canUpdate,
+  hasUnsavedChanges,
+}: Props) {
   const [images, setImages] = useState<PropertyImageItem[]>([]);
   const [loadingImages, setLoadingImages] = useState(Boolean(propertyId));
   const [visionBusy, setVisionBusy] = useState(false);
@@ -185,6 +198,13 @@ export function PropertyAiStudioPanel({ organizationId, propertyId, propertyTitl
   const [reelResult, setReelResult] = useState<(ReelLiteResult & { url: string }) | null>(null);
   const [reelTemplate, setReelTemplate] = useState<ReelLiteTemplate>("editorial");
   const [reelSoundtrack, setReelSoundtrack] = useState(true);
+  const [reelUseOrganizationBrand, setReelUseOrganizationBrand] = useState(true);
+  const [reelHeadline, setReelHeadline] = useState("");
+  const [reelCtaText, setReelCtaText] = useState("Agende uma visita");
+  const [reelSupportText, setReelSupportText] = useState("");
+  const [reelShowPrice, setReelShowPrice] = useState(true);
+  const [reelShowLocation, setReelShowLocation] = useState(true);
+  const [reelShowSpecs, setReelShowSpecs] = useState(true);
   const support = useMemo(() => browserVisionSupport(), []);
   const reelSupport = useMemo(() => reelLiteSupport(), []);
 
@@ -317,6 +337,18 @@ export function PropertyAiStudioPanel({ organizationId, propertyId, propertyTitl
           template: reelTemplate,
           soundtrack: reelSoundtrack && reelSupport.audioSupported,
           facts: reelFacts,
+          branding: {
+            brandName: organizationName,
+            logoUrl: organizationLogoUrl,
+            agentName: currentUserName,
+            useOrganizationBrand: reelUseOrganizationBrand,
+          },
+          headline: reelHeadline || null,
+          ctaText: reelCtaText || null,
+          supportText: reelSupportText || null,
+          showPrice: reelShowPrice,
+          showLocation: reelShowLocation,
+          showSpecs: reelShowSpecs,
         },
         setReelProgress,
       );
@@ -419,6 +451,69 @@ export function PropertyAiStudioPanel({ organizationId, propertyId, propertyTitl
           </span>
           <small>{reelSupport.audioSupported ? "Trilha sintética original, gerada no navegador sem arquivo externo ou licença." : "O Reel continua sendo exportado normalmente sem áudio neste navegador."}</small>
         </label>
+      </div>
+      <div className="app-ai-reel-customization">
+        <div className="app-ai-reel-customization__header">
+          <div>
+            <strong>Personalização comercial</strong>
+            <span>Os campos abaixo alteram somente este Reel e não modificam o cadastro do imóvel.</span>
+          </div>
+          <label className="app-ai-reel-brand-toggle">
+            <input
+              type="checkbox"
+              checked={reelUseOrganizationBrand}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setReelUseOrganizationBrand(event.target.checked)}
+              disabled={reelBusy}
+            />
+            <span>Usar marca da imobiliária</span>
+          </label>
+        </div>
+        <div className="app-ai-reel-customization__grid">
+          <label>
+            <span>Headline final</span>
+            <input
+              type="text"
+              value={reelHeadline}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setReelHeadline(event.target.value.slice(0, 72))}
+              placeholder={reelTemplate === "impact" ? "Descubra um novo jeito de morar" : "Seu próximo imóvel começa aqui"}
+              disabled={reelBusy}
+            />
+            <small>{reelHeadline.length}/72 · deixe vazio para usar o texto do template.</small>
+          </label>
+          <label>
+            <span>Botão / CTA</span>
+            <input
+              type="text"
+              value={reelCtaText}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setReelCtaText(event.target.value.slice(0, 40))}
+              placeholder="Agende uma visita"
+              disabled={reelBusy}
+            />
+            <small>{reelCtaText.length}/40</small>
+          </label>
+          <label className="app-ai-reel-customization__wide">
+            <span>Texto de contato</span>
+            <input
+              type="text"
+              value={reelSupportText}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setReelSupportText(event.target.value.slice(0, 74))}
+              placeholder={currentUserName ? `Fale com ${currentUserName} e saiba mais.` : `Fale com ${organizationName || "nossa equipe"} e saiba mais.`}
+              disabled={reelBusy}
+            />
+            <small>{reelSupportText.length}/74 · vazio usa automaticamente o responsável atual.</small>
+          </label>
+        </div>
+        <div className="app-ai-reel-data-toggles" aria-label="Dados exibidos no Reel">
+          <span>Exibir no vídeo:</span>
+          <label><input type="checkbox" checked={reelShowPrice} onChange={(event: ChangeEvent<HTMLInputElement>) => setReelShowPrice(event.target.checked)} disabled={reelBusy}/><span>Preço</span></label>
+          <label><input type="checkbox" checked={reelShowLocation} onChange={(event: ChangeEvent<HTMLInputElement>) => setReelShowLocation(event.target.checked)} disabled={reelBusy}/><span>Localização</span></label>
+          <label><input type="checkbox" checked={reelShowSpecs} onChange={(event: ChangeEvent<HTMLInputElement>) => setReelShowSpecs(event.target.checked)} disabled={reelBusy}/><span>Área, quartos e vagas</span></label>
+        </div>
+        <div className="app-ai-reel-brand-preview">
+          <span>Assinatura:</span>
+          {reelUseOrganizationBrand ? <strong>{organizationName || "Sua imobiliária"}</strong> : <strong>Escala IMOB</strong>}
+          {reelUseOrganizationBrand && organizationLogoUrl ? <span>logo da organização incluído</span> : null}
+        </div>
       </div>
       <div className="app-ai-reel-controls">
         <div>

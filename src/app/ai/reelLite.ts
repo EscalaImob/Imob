@@ -39,11 +39,25 @@ export interface ReelLiteFacts {
   areaUnit?: string | null;
 }
 
+export interface ReelLiteBranding {
+  brandName?: string | null;
+  logoUrl?: string | null;
+  agentName?: string | null;
+  useOrganizationBrand?: boolean;
+}
+
 export interface ReelLiteOptions {
   title: string;
   template: ReelLiteTemplate;
   soundtrack: boolean;
   facts?: ReelLiteFacts;
+  branding?: ReelLiteBranding;
+  headline?: string | null;
+  ctaText?: string | null;
+  supportText?: string | null;
+  showPrice?: boolean;
+  showLocation?: boolean;
+  showSpecs?: boolean;
 }
 
 export interface ReelLiteSource {
@@ -82,6 +96,13 @@ export interface ReelLiteSupport {
 interface PreparedSource extends ReelLiteSource {
   bitmap: ImageBitmap;
   columnDepth: Float32Array | null;
+}
+
+interface PreparedBranding {
+  brandName: string;
+  agentName: string | null;
+  logo: ImageBitmap | null;
+  poweredByEscala: boolean;
 }
 
 interface TemplatePalette {
@@ -187,6 +208,36 @@ async function loadBitmap(imageUrl: string): Promise<ImageBitmap> {
   const blob = await response.blob();
   if (blob.size === 0) throw new Error("REEL_IMAGE_EMPTY");
   return createImageBitmap(blob);
+}
+
+async function loadOptionalBitmap(imageUrl: string | null | undefined): Promise<ImageBitmap | null> {
+  if (!imageUrl?.trim()) return null;
+  try {
+    return await loadBitmap(imageUrl.trim());
+  } catch {
+    return null;
+  }
+}
+
+function cleanReelText(value: string | null | undefined, fallback: string, maxLength: number): string {
+  const normalized = value?.replace(/\s+/gu, " ").trim();
+  return (normalized || fallback).slice(0, maxLength);
+}
+
+async function prepareBranding(options: ReelLiteOptions): Promise<PreparedBranding> {
+  const requestedOrganizationBrand = options.branding?.useOrganizationBrand !== false;
+  const organizationName = cleanReelText(options.branding?.brandName, "", 48);
+  const brandName = requestedOrganizationBrand && organizationName ? organizationName : "Escala IMOB";
+  const agentName = requestedOrganizationBrand
+    ? cleanReelText(options.branding?.agentName, "", 44) || null
+    : null;
+  const logo = requestedOrganizationBrand ? await loadOptionalBitmap(options.branding?.logoUrl) : null;
+  return {
+    brandName,
+    agentName,
+    logo,
+    poweredByEscala: brandName.toLocaleLowerCase("pt-BR") !== "escala imob",
+  };
 }
 
 function depthColumns(depth: PropertyDepthMap | null, columnCount = 30): Float32Array | null {
@@ -313,6 +364,45 @@ function drawPill(
   return width;
 }
 
+function drawBitmapContain(
+  context: CanvasRenderingContext2D,
+  bitmap: ImageBitmap,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): void {
+  const scale = Math.min(width / bitmap.width, height / bitmap.height);
+  const drawWidth = bitmap.width * scale;
+  const drawHeight = bitmap.height * scale;
+  context.drawImage(
+    bitmap,
+    x + (width - drawWidth) / 2,
+    y + (height - drawHeight) / 2,
+    drawWidth,
+    drawHeight,
+  );
+}
+
+function drawBrandSignature(
+  context: CanvasRenderingContext2D,
+  branding: PreparedBranding,
+  right: number,
+  y: number,
+): void {
+  context.save();
+  context.textAlign = "right";
+  context.textBaseline = "middle";
+  if (branding.logo) {
+    drawBitmapContain(context, branding.logo, right - 136, y - 20, 136, 40);
+  } else {
+    context.font = "800 20px Montserrat, Arial, sans-serif";
+    context.fillStyle = "#ffffff";
+    context.fillText(branding.brandName, right, y);
+  }
+  context.restore();
+}
+
 function drawForeground(
   context: CanvasRenderingContext2D,
   source: PreparedSource,
@@ -370,6 +460,7 @@ function drawForeground(
 function drawSceneOverlay(
   context: CanvasRenderingContext2D,
   options: ReelLiteOptions,
+  branding: PreparedBranding,
   source: PreparedSource,
   progress: number,
   imageIndex: number,
@@ -387,7 +478,10 @@ function drawSceneOverlay(
   const entrance = easeOut(Math.min(1, progress / 0.22));
   const translateY = (1 - entrance) * 22;
   const alpha = entrance;
-  const safeTitle = options.title.trim() || "Imóvel em destaque";
+  const safeTitle = cleanReelText(options.title, "Imóvel em destaque", 70);
+  const eyebrow = imageIndex === 0
+    ? cleanReelText(branding.brandName, palette.eyebrow, 48).toLocaleUpperCase("pt-BR")
+    : `CENA ${imageIndex + 1} · ${source.label.toUpperCase()}`;
 
   context.save();
   context.globalAlpha = alpha;
@@ -395,7 +489,7 @@ function drawSceneOverlay(
   context.fillStyle = palette.accent;
   context.font = "800 16px Montserrat, Arial, sans-serif";
   context.textBaseline = "top";
-  context.fillText(imageIndex === 0 ? palette.eyebrow : `CENA ${imageIndex + 1} · ${source.label.toUpperCase()}`, 44, 34);
+  context.fillText(eyebrow, 44, 34);
 
   context.fillStyle = "#ffffff";
   const size = fitText(context, safeTitle, WIDTH - 88, options.template === "impact" ? 46 : 42, 28);
@@ -413,7 +507,7 @@ function drawSceneOverlay(
   context.fillText(source.label || "Imóvel", 44, 1101);
   context.restore();
 
-  const specs = reelSpecs(options.facts);
+  const specs = options.showSpecs === false ? [] : reelSpecs(options.facts);
   if (specs.length) {
     let x = 44;
     for (const spec of specs) {
@@ -427,11 +521,7 @@ function drawSceneOverlay(
     context.fillText(`${imageIndex + 1}/${imageCount} · Reel Lite`, 44, 1154);
   }
 
-  context.font = "800 22px Montserrat, Arial, sans-serif";
-  context.fillStyle = "#ffffff";
-  context.textAlign = "right";
-  context.fillText("escala imob", WIDTH - 44, 1204);
-  context.textAlign = "left";
+  drawBrandSignature(context, branding, WIDTH - 44, 1204);
 
   context.fillStyle = palette.accent;
   const progressWidth = (WIDTH - 88) * ((imageIndex + clamp(progress, 0, 1)) / imageCount);
@@ -445,6 +535,7 @@ function drawScene(
   source: PreparedSource,
   progress: number,
   options: ReelLiteOptions,
+  branding: PreparedBranding,
   imageIndex: number,
   imageCount: number,
   clearFirst = true,
@@ -462,7 +553,7 @@ function drawScene(
   context.restore();
 
   drawForeground(context, source, progress, options.template);
-  drawSceneOverlay(context, options, source, progress, imageIndex, imageCount);
+  drawSceneOverlay(context, options, branding, source, progress, imageIndex, imageCount);
   context.restore();
 }
 
@@ -495,6 +586,7 @@ function drawCtaScene(
   context: CanvasRenderingContext2D,
   source: PreparedSource,
   options: ReelLiteOptions,
+  branding: PreparedBranding,
   progress: number,
 ): void {
   const palette = TEMPLATE_PALETTES[options.template];
@@ -514,24 +606,30 @@ function drawCtaScene(
   context.save();
   context.globalAlpha = entrance;
   context.translate(0, (1 - entrance) * 36);
-  context.fillStyle = palette.accent;
-  context.font = "800 17px Montserrat, Arial, sans-serif";
   context.textAlign = "center";
-  context.fillText("ESCALA IMOB", WIDTH / 2, 170);
 
-  const headline = palette.headline;
+  if (branding.logo) {
+    drawBitmapContain(context, branding.logo, WIDTH / 2 - 110, 118, 220, 74);
+  } else {
+    context.fillStyle = palette.accent;
+    context.font = "800 18px Montserrat, Arial, sans-serif";
+    context.fillText(branding.brandName.toLocaleUpperCase("pt-BR"), WIDTH / 2, 164);
+  }
+
+  const headline = cleanReelText(options.headline, palette.headline, 72);
   context.fillStyle = "#ffffff";
-  context.font = `800 ${options.template === "impact" ? 56 : 50}px Montserrat, Arial, sans-serif`;
+  const headlineSize = fitText(context, headline, WIDTH - 112, options.template === "impact" ? 56 : 50, 36);
+  context.font = `800 ${headlineSize}px Montserrat, Arial, sans-serif`;
   context.textBaseline = "top";
-  drawWrappedCenteredText(context, headline, WIDTH / 2, 236, WIDTH - 112, 66);
+  drawWrappedCenteredText(context, headline, WIDTH / 2, 236, WIDTH - 112, Math.round(headlineSize * 1.17));
 
-  const safeTitle = options.title.trim() || "Imóvel em destaque";
+  const safeTitle = cleanReelText(options.title, "Imóvel em destaque", 70);
   context.font = "700 26px Montserrat, Arial, sans-serif";
   context.fillStyle = "rgba(255,255,255,0.84)";
   drawWrappedCenteredText(context, safeTitle, WIDTH / 2, 430, WIDTH - 130, 38);
 
-  const location = reelLocation(options.facts);
-  const price = reelPrice(options.facts);
+  const location = options.showLocation === false ? null : reelLocation(options.facts);
+  const price = options.showPrice === false ? null : reelPrice(options.facts);
   let infoY = 570;
   if (location) {
     context.font = "600 23px Montserrat, Arial, sans-serif";
@@ -554,21 +652,40 @@ function drawCtaScene(
   context.fillStyle = "#ffffff";
   context.font = "800 26px Montserrat, Arial, sans-serif";
   context.textBaseline = "middle";
-  context.fillText("Agende uma visita", 0, 0);
+  context.fillText(cleanReelText(options.ctaText, "Agende uma visita", 40), 0, 0);
   context.restore();
 
+  const defaultSupport = branding.agentName
+    ? `Fale com ${branding.agentName} e saiba mais.`
+    : `Fale com ${branding.brandName} e saiba mais.`;
   context.font = "600 20px Montserrat, Arial, sans-serif";
-  context.fillStyle = "rgba(255,255,255,0.62)";
-  context.fillText("Fale com sua imobiliária e saiba mais.", WIDTH / 2, 870);
+  context.fillStyle = "rgba(255,255,255,0.66)";
+  drawWrappedCenteredText(
+    context,
+    cleanReelText(options.supportText, defaultSupport, 74),
+    WIDTH / 2,
+    866,
+    WIDTH - 150,
+    30,
+  );
 
   context.fillStyle = palette.accent;
-  context.fillRect(WIDTH / 2 - 48, 1034, 96, 5);
-  context.font = "800 27px Montserrat, Arial, sans-serif";
-  context.fillStyle = "#ffffff";
-  context.fillText("escala imob", WIDTH / 2, 1082);
-  context.font = "600 17px Montserrat, Arial, sans-serif";
+  context.fillRect(WIDTH / 2 - 48, 1030, 96, 5);
+  if (branding.logo) {
+    drawBitmapContain(context, branding.logo, WIDTH / 2 - 110, 1050, 220, 62);
+  } else {
+    context.font = "800 27px Montserrat, Arial, sans-serif";
+    context.fillStyle = "#ffffff";
+    context.fillText(branding.brandName, WIDTH / 2, 1082);
+  }
+
+  context.font = "600 16px Montserrat, Arial, sans-serif";
   context.fillStyle = "rgba(255,255,255,0.54)";
-  context.fillText("Reel criado localmente · API visual R$ 0", WIDTH / 2, 1128);
+  context.fillText(
+    branding.poweredByEscala ? "Criado com Estúdio IMOB · powered by Escala IMOB" : "Reel criado localmente · API visual R$ 0",
+    WIDTH / 2,
+    1132,
+  );
   context.restore();
   context.textAlign = "left";
 }
@@ -686,12 +803,14 @@ export async function createReelLiteMp4(
   if (sources.length === 0) throw new Error("REEL_NO_IMAGES");
 
   const prepared = await prepareSources(sources, onProgress);
+  const branding = await prepareBranding(options);
   const canvas = document.createElement("canvas");
   canvas.width = WIDTH;
   canvas.height = HEIGHT;
   const context = canvas.getContext("2d", { alpha: false });
   if (!context) {
     for (const source of prepared) source.bitmap.close();
+    branding.logo?.close();
     throw new Error("REEL_CANVAS_UNAVAILABLE");
   }
 
@@ -729,7 +848,7 @@ export async function createReelLiteMp4(
   let lastReported = -1;
 
   try {
-    drawScene(context, prepared[0]!, 0, options, 0, prepared.length);
+    drawScene(context, prepared[0]!, 0, options, branding, 0, prepared.length);
     recorder.start(750);
     soundtrack?.start(durationSeconds);
     const startedAt = performance.now();
@@ -742,7 +861,7 @@ export async function createReelLiteMp4(
           const rawIndex = Math.min(prepared.length - 1, Math.floor(elapsed / SECONDS_PER_IMAGE));
           const sceneStart = rawIndex * SECONDS_PER_IMAGE;
           const sceneProgress = clamp((elapsed - sceneStart) / SECONDS_PER_IMAGE, 0, 1);
-          drawScene(context, prepared[rawIndex]!, sceneProgress, options, rawIndex, prepared.length);
+          drawScene(context, prepared[rawIndex]!, sceneProgress, options, branding, rawIndex, prepared.length);
 
           if (rawIndex < prepared.length - 1 && sceneProgress > 1 - TRANSITION_FRACTION) {
             const transitionProgress = easeInOut((sceneProgress - (1 - TRANSITION_FRACTION)) / TRANSITION_FRACTION);
@@ -753,6 +872,7 @@ export async function createReelLiteMp4(
               prepared[rawIndex + 1]!,
               transitionProgress * 0.14,
               options,
+              branding,
               rawIndex + 1,
               prepared.length,
               false,
@@ -760,7 +880,7 @@ export async function createReelLiteMp4(
             context.restore();
           }
         } else {
-          drawCtaScene(context, prepared[prepared.length - 1]!, options, (elapsed - scenesDuration) / CTA_SECONDS);
+          drawCtaScene(context, prepared[prepared.length - 1]!, options, branding, (elapsed - scenesDuration) / CTA_SECONDS);
         }
 
         const percent = Math.min(100, Math.floor((elapsed / durationSeconds) * 100));
@@ -799,6 +919,7 @@ export async function createReelLiteMp4(
     for (const track of recorderStream.getTracks()) track.stop();
     for (const track of videoStream.getTracks()) track.stop();
     for (const source of prepared) source.bitmap.close();
+    branding.logo?.close();
     if (soundtrack) await soundtrack.context.close().catch(() => undefined);
   }
 }
