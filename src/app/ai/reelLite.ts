@@ -6,6 +6,7 @@ const FPS = 30;
 const SECONDS_PER_IMAGE = 2.7;
 const MAX_IMAGES = 6;
 const VIDEO_BITRATE = 5_000_000;
+const TRANSITION_FRACTION = 0.18;
 const MP4_MIME_TYPES = [
   "video/mp4;codecs=avc1.42E01E",
   "video/mp4;codecs=avc3.42E01E",
@@ -153,7 +154,23 @@ function drawForeground(
   context.save();
   roundRectPath(context, frameX, frameY, frameWidth, frameHeight, 22);
   context.clip();
-  context.fillStyle = "rgba(7, 10, 18, 0.94)";
+
+  // Preenche a área vertical com a própria foto desfocada, evitando faixas pretas
+  // quando a imagem original é horizontal, sem sacrificar o enquadramento principal.
+  context.save();
+  context.filter = "blur(24px) brightness(0.52) saturate(0.9)";
+  drawCover(
+    context,
+    bitmap,
+    frameX - 28,
+    frameY - 28,
+    frameWidth + 56,
+    frameHeight + 56,
+    1.08,
+    movement * 0.4,
+  );
+  context.restore();
+  context.fillStyle = "rgba(5, 8, 16, 0.20)";
   context.fillRect(frameX, frameY, frameWidth, frameHeight);
 
   if (!columnDepth) {
@@ -230,11 +247,14 @@ function drawScene(
   title: string,
   imageIndex: number,
   imageCount: number,
+  clearFirst = true,
 ): void {
   context.save();
-  context.clearRect(0, 0, WIDTH, HEIGHT);
-  context.fillStyle = "#090b12";
-  context.fillRect(0, 0, WIDTH, HEIGHT);
+  if (clearFirst) {
+    context.clearRect(0, 0, WIDTH, HEIGHT);
+    context.fillStyle = "#090b12";
+    context.fillRect(0, 0, WIDTH, HEIGHT);
+  }
 
   context.save();
   context.filter = "blur(34px) brightness(0.58) saturate(0.88)";
@@ -243,11 +263,6 @@ function drawScene(
 
   drawForeground(context, source, progress);
   drawOverlay(context, title, source, imageIndex, imageCount);
-
-  const fade = Math.min(progress / 0.12, (1 - progress) / 0.12, 1);
-  context.globalAlpha = 1 - clamp(fade, 0, 1);
-  context.fillStyle = "#070910";
-  context.fillRect(0, 0, WIDTH, HEIGHT);
   context.restore();
 }
 
@@ -339,6 +354,26 @@ export async function createReelLiteMp4(
         const sceneStart = rawIndex * SECONDS_PER_IMAGE;
         const sceneProgress = clamp((elapsed - sceneStart) / SECONDS_PER_IMAGE, 0, 1);
         drawScene(context, prepared[rawIndex]!, sceneProgress, title, rawIndex, prepared.length);
+
+        // Faz crossfade direto entre cenas. Além de ficar mais fluido, isso evita
+        // quadros totalmente pretos no início e nas trocas de foto.
+        if (rawIndex < prepared.length - 1 && sceneProgress > 1 - TRANSITION_FRACTION) {
+          const transitionProgress = easeInOut(
+            (sceneProgress - (1 - TRANSITION_FRACTION)) / TRANSITION_FRACTION,
+          );
+          context.save();
+          context.globalAlpha = transitionProgress;
+          drawScene(
+            context,
+            prepared[rawIndex + 1]!,
+            transitionProgress * 0.12,
+            title,
+            rawIndex + 1,
+            prepared.length,
+            false,
+          );
+          context.restore();
+        }
 
         const percent = Math.min(100, Math.floor((elapsed / durationSeconds) * 100));
         if (percent !== lastReported) {
