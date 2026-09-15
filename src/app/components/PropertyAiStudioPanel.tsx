@@ -35,6 +35,31 @@ function progressLabel(progress: { status: string | null; progress: number | nul
   return progress.status ? "Preparando modelo local..." : null;
 }
 
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function classifyPhotoWithRetry(
+  imageUrl: string,
+  onProgress: (progress: { status: string | null; progress: number | null; file: string | null }) => void,
+): Promise<PropertyPhotoClassification> {
+  let lastError: unknown;
+  const retryDelays = [800, 1800];
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await classifyPropertyPhoto(imageUrl, onProgress);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= retryDelays.length) break;
+      resetBrowserVisionWorker();
+      await wait(retryDelays[attempt] ?? 800);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("CLASSIFICATION_FAILED");
+}
+
 function DepthParallaxPreview({ imageUrl, depth }: { imageUrl: string; depth: PropertyDepthMap }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sourceRef = useRef<ImageData | null>(null);
@@ -176,14 +201,9 @@ export function PropertyAiStudioPanel({ organizationId, propertyId, canUpdate, h
       setImages(freshImages);
       const next: AnalysisByImage = {};
       for (const image of freshImages) {
-        try {
-          next[image.id] = await classifyPropertyPhoto(image.viewUrl, setVisionProgress);
-        } catch {
-          // Uma primeira carga do runtime/modelo pode falhar por cache/CDN. Reinicia o
-          // worker e tenta a mesma foto mais uma vez, sem exigir qualquer ação manual.
-          resetBrowserVisionWorker();
-          next[image.id] = await classifyPropertyPhoto(image.viewUrl, setVisionProgress);
-        }
+        // A primeira carga pode falhar enquanto CDN/cache/modelo ainda estão aquecendo.
+        // Faz até três tentativas com pequeno backoff antes de mostrar erro ao usuário.
+        next[image.id] = await classifyPhotoWithRetry(image.viewUrl, setVisionProgress);
         setAnalysis({ ...next });
       }
     } catch {
