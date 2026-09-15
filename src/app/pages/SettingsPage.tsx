@@ -10,6 +10,7 @@ import {
   createOrganizationRole,
   createOrganizationTeam,
   getOrganizationIdentity,
+  getOrganizationAiStudioSettings,
   getOrganizationDocumentSettings,
   getOrganizationFinancialSettings,
   getOrganizationNotificationSettings,
@@ -39,6 +40,7 @@ import {
   removeOrganizationTeamMember,
   requestOrganizationMemberAccessReset,
   updateOrganizationIdentity,
+  updateOrganizationAiStudioSettings,
   updateOrganizationDocumentSettings,
   updateOrganizationFinancialSettings,
   updateOrganizationNotificationSettings,
@@ -55,6 +57,8 @@ import {
   uploadOrganizationIdentityLogo,
   type ManagedOrganizationMembershipStatus,
   type OrganizationAccessScope,
+  type OrganizationAiStudioSettings,
+  type OrganizationAiStudioSettingsUpdate,
   type OrganizationMember,
   type OrganizationMembershipStatus,
   type OrganizationLeadDistributionPropertyType,
@@ -118,7 +122,7 @@ interface Props {
   onUpdated: () => Promise<void> | void;
 }
 
-type SettingsSection = "company" | "identity" | "appearance" | "properties" | "documents" | "financial" | "notifications" | "integrations" | "security" | "transfers" | "people" | "operational";
+type SettingsSection = "company" | "identity" | "appearance" | "properties" | "aiStudio" | "documents" | "financial" | "notifications" | "integrations" | "security" | "transfers" | "people" | "operational";
 
 type RoleGrantDraft = Record<string, OrganizationAccessScope | "">;
 interface RoleDraft {
@@ -558,7 +562,8 @@ export function SettingsPage({
   onUpdated,
 }: Props) {
   const initialSection = new URLSearchParams(globalThis.location.search).get("section");
-  const [section, setSection] = useState<SettingsSection>(initialSection === "transfers" || initialSection === "operational" || initialSection === "appearance" ? initialSection : "company");
+  const settingsSections: SettingsSection[] = ["company", "identity", "appearance", "properties", "aiStudio", "documents", "financial", "notifications", "integrations", "security", "transfers", "people", "operational"];
+  const [section, setSection] = useState<SettingsSection>(settingsSections.includes(initialSection as SettingsSection) ? initialSection as SettingsSection : "company");
   const [panelTheme, setPanelTheme] = useState<PanelTheme>(() => readPanelTheme(organizationId, currentMembershipId));
   const [panelThemeSaved, setPanelThemeSaved] = useState(false);
   useEffect(() => { const loaded = readPanelTheme(organizationId, currentMembershipId); setPanelTheme(loaded); applyPanelTheme(loaded); }, [organizationId, currentMembershipId]);
@@ -578,6 +583,10 @@ export function SettingsPage({
   const [propertySettingsDraftState, setPropertySettingsDraftState] = useState<OrganizationPropertySettingsUpdate | null>(null);
   const [propertySettingsLoading, setPropertySettingsLoading] = useState(false);
   const [propertySettingsSaving, setPropertySettingsSaving] = useState(false);
+  const [aiStudioSettings, setAiStudioSettings] = useState<OrganizationAiStudioSettings | null>(null);
+  const [aiStudioDraft, setAiStudioDraft] = useState<OrganizationAiStudioSettingsUpdate | null>(null);
+  const [aiStudioLoading, setAiStudioLoading] = useState(false);
+  const [aiStudioSaving, setAiStudioSaving] = useState(false);
   const [documentSettings, setDocumentSettings] = useState<OrganizationDocumentSettings | null>(null);
   const [documentSettingsDraftState, setDocumentSettingsDraftState] = useState<OrganizationDocumentSettingsUpdate | null>(null);
   const [documentSettingsLoading, setDocumentSettingsLoading] = useState(false);
@@ -710,6 +719,26 @@ export function SettingsPage({
         setError(loadError instanceof AppApiError ? loadError.message : "Não foi possível carregar as configurações de imóveis.");
       })
       .finally(() => { if (active) setPropertySettingsLoading(false); });
+    return () => { active = false; };
+  }, [organizationId, section]);
+
+  useEffect(() => {
+    if (section !== "aiStudio") return;
+    let active = true;
+    setAiStudioLoading(true);
+    setError(null);
+    setSuccess(null);
+    void getOrganizationAiStudioSettings(organizationId)
+      .then((result) => {
+        if (!active) return;
+        setAiStudioSettings(result);
+        setAiStudioDraft(structuredClone(result.defaults));
+      })
+      .catch((loadError) => {
+        if (!active) return;
+        setError(loadError instanceof AppApiError ? loadError.message : "Não foi possível carregar os padrões do Estúdio IA.");
+      })
+      .finally(() => { if (active) setAiStudioLoading(false); });
     return () => { active = false; };
   }, [organizationId, section]);
 
@@ -883,6 +912,11 @@ export function SettingsPage({
     if (!propertySettings || !propertySettingsDraftState) return false;
     return JSON.stringify(normalizedPropertySettingsDraft(propertySettingsDraftState)) !== JSON.stringify(normalizedPropertySettingsDraft(propertySettings));
   }, [propertySettings, propertySettingsDraftState]);
+
+  const aiStudioDirty = useMemo(() => {
+    if (!aiStudioSettings || !aiStudioDraft) return false;
+    return JSON.stringify(aiStudioSettings.defaults) !== JSON.stringify(aiStudioDraft);
+  }, [aiStudioDraft, aiStudioSettings]);
 
   const documentSettingsDirty = useMemo(() => {
     if (!documentSettings || !documentSettingsDraftState) return false;
@@ -1080,6 +1114,30 @@ export function SettingsPage({
       setError(saveError instanceof AppApiError ? saveError.message : "Não foi possível salvar as configurações de imóveis.");
     } finally {
       setPropertySettingsSaving(false);
+    }
+  }
+
+  async function saveAiStudioSettings() {
+    if (!aiStudioDraft || aiStudioSaving || !canUpdate) return;
+    const ctaText = aiStudioDraft.ctaText.trim();
+    if (!ctaText) { setError("Informe o CTA padrão do Reel."); return; }
+    setAiStudioSaving(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const updated = await updateOrganizationAiStudioSettings(organizationId, {
+        ...aiStudioDraft,
+        headline: aiStudioDraft.headline?.trim() || null,
+        ctaText,
+        supportText: aiStudioDraft.supportText?.trim() || null,
+      });
+      setAiStudioSettings(updated);
+      setAiStudioDraft(structuredClone(updated.defaults));
+      setSuccess("Padrões do Estúdio IA salvos para a organização.");
+    } catch (saveError) {
+      setError(saveError instanceof AppApiError ? saveError.message : "Não foi possível salvar os padrões do Estúdio IA.");
+    } finally {
+      setAiStudioSaving(false);
     }
   }
 
@@ -1681,6 +1739,7 @@ export function SettingsPage({
       {section === "company" && canUpdate && <button className="app-primary-button" type="button" disabled={!dirty || saving || loading} onClick={() => void save()}>{saving ? "Salvando..." : "Salvar alterações"}</button>}
       {section === "identity" && canUpdate && <button className="app-primary-button" type="button" disabled={!identityDirty || identitySaving || identityLoading} onClick={() => void saveIdentity()}>{identitySaving ? "Salvando..." : "Salvar identidade"}</button>}
       {section === "properties" && canUpdate && <button className="app-primary-button" type="button" disabled={!propertySettingsDirty || propertySettingsSaving || propertySettingsLoading} onClick={() => void savePropertySettings()}>{propertySettingsSaving ? "Salvando..." : "Salvar imóveis"}</button>}
+      {section === "aiStudio" && canUpdate && <button className="app-primary-button" type="button" disabled={!aiStudioDirty || aiStudioSaving || aiStudioLoading} onClick={() => void saveAiStudioSettings()}>{aiStudioSaving ? "Salvando..." : "Salvar Estúdio IA"}</button>}
       {section === "documents" && canUpdate && <button className="app-primary-button" type="button" disabled={!documentSettingsDirty || documentSettingsSaving || documentSettingsLoading} onClick={() => void saveDocumentSettings()}>{documentSettingsSaving ? "Salvando..." : "Salvar documentos"}</button>}
       {section === "financial" && canUpdate && <button className="app-primary-button" type="button" disabled={!financialSettingsDirty || financialSettingsSaving || financialSettingsLoading} onClick={() => void saveFinancialSettings()}>{financialSettingsSaving ? "Salvando..." : "Salvar financeiro"}</button>}
       {section === "notifications" && canUpdate && <button className="app-primary-button" type="button" disabled={!notificationSettingsDirty || notificationSettingsSaving || notificationSettingsLoading} onClick={() => void saveNotificationSettings()}>{notificationSettingsSaving ? "Salvando..." : "Salvar notificações"}</button>}
@@ -1693,6 +1752,7 @@ export function SettingsPage({
         <button type="button" className={section === "identity" ? "is-active" : ""} onClick={() => setSection("identity")}><GlobeIcon/><span><strong>Identidade e site</strong><small>Marca, logo e canais públicos</small></span></button>
         <button type="button" className={section === "appearance" ? "is-active" : ""} onClick={() => setSection("appearance")}><SettingsIcon/><span><strong>Aparência do painel</strong><small>Cores exclusivas para minha conta</small></span></button>
         <button type="button" className={section === "properties" ? "is-active" : ""} onClick={() => setSection("properties")}><BuildingIcon/><span><strong>Configurações de imóveis</strong><small>Catálogos, padrões e regras</small></span></button>
+        <button type="button" className={section === "aiStudio" ? "is-active" : ""} onClick={() => setSection("aiStudio")}><SettingsIcon/><span><strong>Estúdio IA</strong><small>Reel, marca e padrões comerciais</small></span></button>
         <button type="button" className={section === "documents" ? "is-active" : ""} onClick={() => setSection("documents")}><DocumentIcon/><span><strong>Configurações de documentos</strong><small>Modelos, numeração e assinatura</small></span></button>
         <button type="button" className={section === "financial" ? "is-active" : ""} onClick={() => setSection("financial")}><SettingsIcon/><span><strong>Configurações financeiras</strong><small>Categorias, contas, comissão e moeda</small></span></button>
         <button type="button" className={section === "notifications" ? "is-active" : ""} onClick={() => setSection("notifications")}><BellIcon/><span><strong>Notificações</strong><small>Eventos e canais da organização</small></span></button>
@@ -1780,6 +1840,35 @@ export function SettingsPage({
             <div className="app-settings-form">
               <label><span>Comodidades do imóvel</span><textarea rows={10} disabled={!canUpdate || propertySettingsSaving} value={propertySettingsDraftState.amenities.join("\n")} onChange={(event) => setPropertySettingsField("amenities", event.target.value.split(/\r?\n/u))}/><small>Ex.: Piscina, Escritório, Varanda gourmet.</small></label>
               <label><span>Comodidades do condomínio</span><textarea rows={10} disabled={!canUpdate || propertySettingsSaving} value={propertySettingsDraftState.condominiumAmenities.join("\n")} onChange={(event) => setPropertySettingsField("condominiumAmenities", event.target.value.split(/\r?\n/u))}/><small>Ex.: Portaria, Academia, Coworking.</small></label>
+            </div>
+          </section>
+        </>)}
+
+        {section === "aiStudio" && (aiStudioLoading || !aiStudioSettings || !aiStudioDraft ? <section className="app-data-card app-settings-loading"><span className="app-spinner"/><p>Carregando Estúdio IA...</p></section> : <>
+          <section className="app-data-card app-settings-card">
+            <header><div><SettingsIcon/><span><strong>Plano e consumo</strong><small>Disponibilidade e limite comercial definidos pela administração da plataforma.</small></span></div>{!canUpdate && <em>Somente leitura</em>}</header>
+            <div className="app-ai-settings-plan">
+              <span><small>Status</small><strong>{aiStudioSettings.enabled ? "Habilitado" : "Desabilitado"}</strong></span>
+              <span><small>Plano</small><strong>{aiStudioSettings.planCode.toUpperCase()}</strong></span>
+              <span><small>Limite mensal de Reels</small><strong>{aiStudioSettings.monthlyReelLimit === null ? "Ilimitado" : aiStudioSettings.monthlyReelLimit}</strong></span>
+            </div>
+            <p className="app-form-help">O administrador da imobiliária define os padrões abaixo. Habilitação, plano e limite mensal são controlados pela administração da Escala IMOB.</p>
+          </section>
+
+          <section className="app-data-card app-settings-card">
+            <header><div><SettingsIcon/><span><strong>Padrões do Reel Lite</strong><small>Novas gerações começam com estas escolhas; o corretor ainda pode ajustar apenas o Reel atual.</small></span></div></header>
+            <div className="app-settings-form">
+              <label><span>Template padrão</span><select value={aiStudioDraft.defaultTemplate} disabled={!canUpdate || aiStudioSaving} onChange={(event) => setAiStudioDraft((current) => current ? { ...current, defaultTemplate: event.target.value as OrganizationAiStudioSettingsUpdate["defaultTemplate"] } : current)}><option value="editorial">Editorial IMOB</option><option value="impact">Impacto</option></select><small>Estilo visual carregado automaticamente no Estúdio.</small></label>
+              <label><span>Headline padrão</span><input value={aiStudioDraft.headline ?? ""} maxLength={72} disabled={!canUpdate || aiStudioSaving} onChange={(event) => setAiStudioDraft((current) => current ? { ...current, headline: event.target.value || null } : current)} placeholder="Deixe vazio para o texto do template"/><small>Até 72 caracteres.</small></label>
+              <label><span>CTA padrão *</span><input value={aiStudioDraft.ctaText} maxLength={40} disabled={!canUpdate || aiStudioSaving} onChange={(event) => setAiStudioDraft((current) => current ? { ...current, ctaText: event.target.value } : current)} placeholder="Agende uma visita"/><small>Até 40 caracteres.</small></label>
+              <label><span>Texto de contato padrão</span><input value={aiStudioDraft.supportText ?? ""} maxLength={74} disabled={!canUpdate || aiStudioSaving} onChange={(event) => setAiStudioDraft((current) => current ? { ...current, supportText: event.target.value || null } : current)} placeholder="Vazio usa o corretor atual"/><small>Até 74 caracteres.</small></label>
+            </div>
+            <div className="app-ai-settings-toggles">
+              <label><input type="checkbox" checked={aiStudioDraft.soundtrack} disabled={!canUpdate || aiStudioSaving} onChange={(event) => setAiStudioDraft((current) => current ? { ...current, soundtrack: event.target.checked } : current)}/><span>Trilha original ligada por padrão</span></label>
+              <label><input type="checkbox" checked={aiStudioDraft.useOrganizationBrand} disabled={!canUpdate || aiStudioSaving} onChange={(event) => setAiStudioDraft((current) => current ? { ...current, useOrganizationBrand: event.target.checked } : current)}/><span>Usar marca da imobiliária</span></label>
+              <label><input type="checkbox" checked={aiStudioDraft.showPrice} disabled={!canUpdate || aiStudioSaving} onChange={(event) => setAiStudioDraft((current) => current ? { ...current, showPrice: event.target.checked } : current)}/><span>Exibir preço quando cadastrado</span></label>
+              <label><input type="checkbox" checked={aiStudioDraft.showLocation} disabled={!canUpdate || aiStudioSaving} onChange={(event) => setAiStudioDraft((current) => current ? { ...current, showLocation: event.target.checked } : current)}/><span>Exibir localização pública</span></label>
+              <label><input type="checkbox" checked={aiStudioDraft.showSpecs} disabled={!canUpdate || aiStudioSaving} onChange={(event) => setAiStudioDraft((current) => current ? { ...current, showSpecs: event.target.checked } : current)}/><span>Exibir área, quartos e vagas</span></label>
             </div>
           </section>
         </>)}

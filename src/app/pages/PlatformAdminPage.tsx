@@ -4,10 +4,14 @@ import {
   createPlatformAccessKey,
   getPlatformOverview,
   listPlatformAccessKeys,
+  listPlatformAiStudioOrganizations,
   revokePlatformAccessKey,
+  updatePlatformAiStudioOrganization,
   type PlatformAccessKey,
   type PlatformAccessKeyFilters,
   type PlatformAccessKeyStatus,
+  type PlatformAiStudioOrganization,
+  type PlatformAiStudioOrganizationUpdate,
   type PlatformOverview,
 } from "../../services/platformAdminApi";
 
@@ -26,9 +30,18 @@ function formatDate(value: string | null): string {
   }).format(new Date(value));
 }
 
+type AiStudioDraft = { enabled: boolean; planCode: string; monthlyReelLimit: string };
+
+function aiStudioDraft(item: PlatformAiStudioOrganization): AiStudioDraft {
+  return { enabled: item.enabled, planCode: item.planCode, monthlyReelLimit: item.monthlyReelLimit === null ? "" : String(item.monthlyReelLimit) };
+}
+
 export function PlatformAdminPage() {
   const [overview, setOverview] = useState<PlatformOverview | null>(null);
   const [keys, setKeys] = useState<PlatformAccessKey[]>([]);
+  const [aiOrganizations, setAiOrganizations] = useState<PlatformAiStudioOrganization[]>([]);
+  const [aiDrafts, setAiDrafts] = useState<Record<string, AiStudioDraft>>({});
+  const [aiSavingId, setAiSavingId] = useState<string | null>(null);
   const [filters, setFilters] = useState<PlatformAccessKeyFilters>({ status: "all" });
   const [cpf, setCpf] = useState("");
   const [expiresInDays, setExpiresInDays] = useState("");
@@ -41,12 +54,15 @@ export function PlatformAdminPage() {
     setLoading(true);
     setMessage(null);
     try {
-      const [summary, accessKeys] = await Promise.all([
+      const [summary, accessKeys, aiStudioOrganizations] = await Promise.all([
         getPlatformOverview(),
         listPlatformAccessKeys(nextFilters),
+        listPlatformAiStudioOrganizations(),
       ]);
       setOverview(summary);
       setKeys(accessKeys);
+      setAiOrganizations(aiStudioOrganizations);
+      setAiDrafts(Object.fromEntries(aiStudioOrganizations.map((item) => [item.organizationId, aiStudioDraft(item)])));
     } catch (error) {
       setMessage({
         tone: "error",
@@ -97,6 +113,29 @@ export function PlatformAdminPage() {
     }
   }
 
+  async function handleSaveAiStudio(item: PlatformAiStudioOrganization) {
+    if (aiSavingId || saving) return;
+    const draft = aiDrafts[item.organizationId];
+    if (!draft) return;
+    const planCode = draft.planCode.trim().toLowerCase();
+    const monthlyLimit = draft.monthlyReelLimit.trim() === "" ? null : Number(draft.monthlyReelLimit);
+    if (!planCode) { setMessage({ tone: "error", text: "Informe o código do plano do Estúdio IA." }); return; }
+    if (monthlyLimit !== null && (!Number.isInteger(monthlyLimit) || monthlyLimit < 0)) { setMessage({ tone: "error", text: "O limite mensal de Reels deve ser um inteiro maior ou igual a zero." }); return; }
+    const input: PlatformAiStudioOrganizationUpdate = { enabled: draft.enabled, planCode, monthlyReelLimit: monthlyLimit };
+    setAiSavingId(item.organizationId);
+    setMessage(null);
+    try {
+      const updated = await updatePlatformAiStudioOrganization(item.organizationId, input);
+      setAiOrganizations((current) => current.map((entry) => entry.organizationId === updated.organizationId ? updated : entry));
+      setAiDrafts((current) => ({ ...current, [updated.organizationId]: aiStudioDraft(updated) }));
+      setMessage({ tone: "success", text: `Plano do Estúdio IA atualizado para ${updated.organizationName}.` });
+    } catch (error) {
+      setMessage({ tone: "error", text: error instanceof AppApiError ? error.message : "Não foi possível atualizar o plano do Estúdio IA." });
+    } finally {
+      setAiSavingId(null);
+    }
+  }
+
   const metricItems = [
     ["Organizações", overview?.organizations ?? 0],
     ["Organizações ativas", overview?.activeOrganizations ?? 0],
@@ -116,6 +155,31 @@ export function PlatformAdminPage() {
       <div className="platform-admin-metrics">
         {metricItems.map(([label, value]) => <article key={String(label)}><span>{label}</span><strong>{value}</strong></article>)}
       </div>
+
+      <article className="platform-admin-card">
+        <header><div><h2>Estúdio IA por organização</h2><p>Habilite o recurso, defina o plano comercial e limite mensal de Reels. Deixe o limite vazio para uso ilimitado.</p></div></header>
+        <div className="platform-admin-table-wrap">
+          <table className="platform-admin-table platform-admin-ai-table">
+            <thead><tr><th>Organização</th><th>Ativo</th><th>Plano</th><th>Uso no mês</th><th>Limite mensal</th><th /></tr></thead>
+            <tbody>
+              {aiOrganizations.map((item) => {
+                const draft = aiDrafts[item.organizationId] ?? aiStudioDraft(item);
+                const dirty = draft.enabled !== item.enabled || draft.planCode.trim().toLowerCase() !== item.planCode || (draft.monthlyReelLimit.trim() === "" ? null : Number(draft.monthlyReelLimit)) !== item.monthlyReelLimit;
+                return <tr key={item.organizationId}>
+                  <td><strong>{item.organizationName}</strong><small>{item.organizationId.slice(0, 8)}</small></td>
+                  <td><input type="checkbox" aria-label={`Estúdio IA ativo para ${item.organizationName}`} checked={draft.enabled} disabled={Boolean(aiSavingId)} onChange={(event) => setAiDrafts((current) => ({ ...current, [item.organizationId]: { ...draft, enabled: event.target.checked } }))}/></td>
+                  <td><input aria-label={`Plano de ${item.organizationName}`} value={draft.planCode} maxLength={32} disabled={Boolean(aiSavingId)} onChange={(event) => setAiDrafts((current) => ({ ...current, [item.organizationId]: { ...draft, planCode: event.target.value.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32) } }))}/></td>
+                  <td><strong>{item.currentMonthUsage}</strong></td>
+                  <td><input aria-label={`Limite mensal de ${item.organizationName}`} value={draft.monthlyReelLimit} inputMode="numeric" placeholder="Ilimitado" disabled={Boolean(aiSavingId)} onChange={(event) => setAiDrafts((current) => ({ ...current, [item.organizationId]: { ...draft, monthlyReelLimit: event.target.value.replace(/\D/g, "").slice(0, 6) } }))}/></td>
+                  <td><button type="button" disabled={!dirty || Boolean(aiSavingId)} onClick={() => void handleSaveAiStudio(item)}>{aiSavingId === item.organizationId ? "Salvando..." : "Salvar"}</button></td>
+                </tr>;
+              })}
+              {!loading && aiOrganizations.length === 0 && <tr><td colSpan={6} className="platform-admin-empty">Nenhuma organização disponível.</td></tr>}
+              {loading && <tr><td colSpan={6} className="platform-admin-empty">Carregando...</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </article>
 
       <article className="platform-admin-card">
         <header><div><h2>Emitir chave de acesso</h2><p>O valor completo aparece somente nesta emissão. O backend armazena apenas o hash.</p></div></header>

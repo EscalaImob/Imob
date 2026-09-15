@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { AppApiError } from "../../services/appApi";
-import { generatePropertyMarketingText, type AiStudioTextKind, type AiStudioTextResult } from "../../services/aiStudioApi";
+import {
+  generatePropertyMarketingText,
+  getAiStudioRuntime,
+  recordAiStudioReelUsage,
+  type AiStudioRuntime,
+  type AiStudioTextKind,
+  type AiStudioTextResult,
+} from "../../services/aiStudioApi";
 import { listPropertyImages, type PropertyImageItem } from "../../services/propertiesApi";
 import {
   createReelLiteMp4,
@@ -205,6 +212,11 @@ export function PropertyAiStudioPanel({
   const [reelShowPrice, setReelShowPrice] = useState(true);
   const [reelShowLocation, setReelShowLocation] = useState(true);
   const [reelShowSpecs, setReelShowSpecs] = useState(true);
+  const [aiRuntime, setAiRuntime] = useState<AiStudioRuntime | null>(null);
+  const [aiRuntimeLoading, setAiRuntimeLoading] = useState(Boolean(propertyId && canUpdate));
+  const [aiRuntimeError, setAiRuntimeError] = useState<string | null>(null);
+  const [reelUsageWarning, setReelUsageWarning] = useState<string | null>(null);
+  const runtimeDefaultsAppliedRef = useRef<string | null>(null);
   const support = useMemo(() => browserVisionSupport(), []);
   const reelSupport = useMemo(() => reelLiteSupport(), []);
 
@@ -227,12 +239,54 @@ export function PropertyAiStudioPanel({
   }, [organizationId, propertyId]);
 
   useEffect(() => { void loadImages(); }, [loadImages]);
+
+  useEffect(() => {
+    runtimeDefaultsAppliedRef.current = null;
+    setAiRuntime(null);
+    setAiRuntimeError(null);
+    if (!propertyId || !canUpdate) {
+      setAiRuntimeLoading(false);
+      return;
+    }
+    let active = true;
+    setAiRuntimeLoading(true);
+    void getAiStudioRuntime(organizationId)
+      .then((runtime) => {
+        if (!active) return;
+        setAiRuntime(runtime);
+        setAiRuntimeError(null);
+        if (runtimeDefaultsAppliedRef.current !== organizationId) {
+          const defaults = runtime.defaults;
+          setReelTemplate(defaults.defaultTemplate);
+          setReelSoundtrack(defaults.soundtrack);
+          setReelUseOrganizationBrand(defaults.useOrganizationBrand);
+          setReelHeadline(defaults.headline ?? "");
+          setReelCtaText(defaults.ctaText);
+          setReelSupportText(defaults.supportText ?? "");
+          setReelShowPrice(defaults.showPrice);
+          setReelShowLocation(defaults.showLocation);
+          setReelShowSpecs(defaults.showSpecs);
+          runtimeDefaultsAppliedRef.current = organizationId;
+        }
+      })
+      .catch((loadError) => {
+        if (!active) return;
+        if (loadError instanceof AppApiError && loadError.code === "AI_STUDIO_DISABLED") {
+          setAiRuntimeError("O Estúdio IA não está habilitado no plano desta organização.");
+        } else {
+          setAiRuntimeError(loadError instanceof AppApiError ? loadError.message : "Não foi possível carregar o plano do Estúdio IA.");
+        }
+      })
+      .finally(() => { if (active) setAiRuntimeLoading(false); });
+    return () => { active = false; };
+  }, [canUpdate, organizationId, propertyId]);
+
   useEffect(() => () => {
     if (reelResult?.url) URL.revokeObjectURL(reelResult.url);
   }, [reelResult?.url]);
 
   async function analyzePhotos() {
-    if (!support.supported || visionBusy || images.length === 0 || !propertyId) return;
+    if (!support.supported || visionBusy || images.length === 0 || !propertyId || aiRuntimeError) return;
     setVisionBusy(true);
     setVisionError(null);
     setVisionProgress(null);
@@ -276,7 +330,7 @@ export function PropertyAiStudioPanel({
 
   async function calculateDepth() {
     const selected = images.find((item) => item.id === depthImageId);
-    if (!selected || visionBusy) return;
+    if (!selected || visionBusy || aiRuntimeError) return;
     setVisionBusy(true);
     setVisionError(null);
     setDepth(null);
@@ -292,9 +346,14 @@ export function PropertyAiStudioPanel({
   }
 
   async function generateReelLite() {
-    if (!propertyId || reelBusy || images.length === 0 || !reelSupport.supported) return;
+    if (!propertyId || reelBusy || images.length === 0 || !reelSupport.supported || aiRuntimeLoading || aiRuntimeError) return;
+    if (aiRuntime && aiRuntime.quota.remaining !== null && aiRuntime.quota.remaining <= 0) {
+      setReelError("O limite mensal de Reels desta organização foi atingido.");
+      return;
+    }
     setReelBusy(true);
     setReelError(null);
+    setReelUsageWarning(null);
     setReelProgress({ phase: "loading", progress: 0, message: "Preparando fotos e profundidade..." });
     if (reelResult?.url) URL.revokeObjectURL(reelResult.url);
     setReelResult(null);
@@ -355,6 +414,22 @@ export function PropertyAiStudioPanel({
       const url = URL.createObjectURL(result.blob);
       setReelResult({ ...result, url });
       setReelProgress(null);
+      try {
+        const updatedRuntime = await recordAiStudioReelUsage(organizationId, propertyId, {
+          generationId: globalThis.crypto.randomUUID(),
+          template: reelTemplate,
+          audioIncluded: result.audioIncluded,
+          imageCount: result.imageCount,
+        });
+        setAiRuntime(updatedRuntime);
+      } catch (usageError) {
+        console.warn("[Estúdio IMOB] Reel gerado, mas o consumo comercial não pôde ser registrado", usageError);
+        setReelUsageWarning(
+          usageError instanceof AppApiError && usageError.code === "AI_STUDIO_REEL_LIMIT_REACHED"
+            ? "O vídeo foi concluído, mas o limite mensal foi atingido durante a geração. Novos Reels ficarão bloqueados até a renovação ou ajuste do plano."
+            : "O vídeo foi concluído, mas não foi possível atualizar o contador mensal agora.",
+        );
+      }
     } catch (error) {
       console.warn("[Estúdio IMOB] Falha ao exportar Reel Lite", error);
       const code = error instanceof Error ? error.message : "REEL_FAILED";
@@ -370,7 +445,7 @@ export function PropertyAiStudioPanel({
   }
 
   async function generateText(kind: AiStudioTextKind) {
-    if (!propertyId || textBusy || !canUpdate) return;
+    if (!propertyId || textBusy || !canUpdate || aiRuntimeLoading || aiRuntimeError) return;
     setTextBusy(kind);
     setTextError(null);
     try {
@@ -397,8 +472,15 @@ export function PropertyAiStudioPanel({
 
     {hasUnsavedChanges && <div className="app-info-banner"><div><strong>Existem alterações não salvas.</strong><p>Os textos usam a última versão salva do imóvel. Salve antes de gerar para considerar os dados mais recentes.</p></div></div>}
 
+    {aiRuntimeLoading && <div className="app-ai-plan-strip"><span className="app-spinner"/><span>Carregando plano e padrões do Estúdio IA...</span></div>}
+    {aiRuntimeError && <div className="app-inline-error">{aiRuntimeError}</div>}
+    {aiRuntime && <div className="app-ai-plan-strip">
+      <div><strong>Plano {aiRuntime.quota.planCode.toUpperCase()}</strong><span>{aiRuntime.quota.monthlyLimit === null ? "Reels mensais ilimitados" : `${aiRuntime.quota.used}/${aiRuntime.quota.monthlyLimit} Reels usados neste mês`}</span></div>
+      <span>{aiRuntime.quota.remaining === null ? "Sem limite" : `${aiRuntime.quota.remaining} restante(s)`}</span>
+    </div>}
+
     <section className="app-form-section app-ai-section">
-      <div className="app-section-title-row"><div><h2>1. Organização das fotos com IA local</h2><p className="app-form-help">SigLIP roda no dispositivo. Na primeira execução o navegador baixa e armazena o modelo em cache.</p></div><button type="button" className="app-primary-button" onClick={() => void analyzePhotos()} disabled={visionBusy || loadingImages || images.length === 0 || !support.supported}>{visionBusy ? "Processando..." : analysis && Object.keys(analysis).length === images.length && images.length ? "Análise concluída" : "Analisar fotos"}</button></div>
+      <div className="app-section-title-row"><div><h2>1. Organização das fotos com IA local</h2><p className="app-form-help">SigLIP roda no dispositivo. Na primeira execução o navegador baixa e armazena o modelo em cache.</p></div><button type="button" className="app-primary-button" onClick={() => void analyzePhotos()} disabled={visionBusy || loadingImages || images.length === 0 || !support.supported || Boolean(aiRuntimeError)}>{visionBusy ? "Processando..." : analysis && Object.keys(analysis).length === images.length && images.length ? "Análise concluída" : "Analisar fotos"}</button></div>
       {!support.supported && <div className="app-inline-error">Este navegador não oferece os recursos mínimos para executar a IA local.</div>}
       {progressText && <div className="app-property-uploading"><span className="app-spinner"/>{progressText}</div>}
       {visionError && <div className="app-inline-error">{visionError}</div>}
@@ -411,13 +493,13 @@ export function PropertyAiStudioPanel({
 
     <section className="app-form-section app-ai-section">
       <div className="app-section-title-row"><div><h2>2. Profundidade e movimento 2.5D</h2><p className="app-form-help">Depth Anything V2 calcula um mapa de profundidade local para preparar o efeito de câmera do Reel Lite.</p></div><span className="app-ai-runtime-badge">{support.webGpu ? "WebGPU disponível" : "WASM compatível"}</span></div>
-      {images.length > 0 && <div className="app-ai-depth-controls"><label><span>Foto para testar</span><select value={depthImageId ?? ""} onChange={(event: ChangeEvent<HTMLSelectElement>) => { setDepthImageId(event.target.value || null); setDepth(null); }}>{images.map((image, index) => <option key={image.id} value={image.id}>{index + 1}. {analysis[image.id]?.label ?? image.originalName}</option>)}</select></label><button type="button" className="app-secondary-button" onClick={() => void calculateDepth()} disabled={visionBusy || !selectedDepthImage}>{depth ? "Recalcular profundidade" : "Calcular profundidade"}</button></div>}
+      {images.length > 0 && <div className="app-ai-depth-controls"><label><span>Foto para testar</span><select value={depthImageId ?? ""} onChange={(event: ChangeEvent<HTMLSelectElement>) => { setDepthImageId(event.target.value || null); setDepth(null); }}>{images.map((image, index) => <option key={image.id} value={image.id}>{index + 1}. {analysis[image.id]?.label ?? image.originalName}</option>)}</select></label><button type="button" className="app-secondary-button" onClick={() => void calculateDepth()} disabled={visionBusy || !selectedDepthImage || Boolean(aiRuntimeError)}>{depth ? "Recalcular profundidade" : "Calcular profundidade"}</button></div>}
       {depth && selectedDepthImage ? <DepthParallaxPreview imageUrl={selectedDepthImage.viewUrl} depth={depth}/> : <div className="app-soft-empty">Escolha uma foto e calcule a profundidade para testar o movimento 2.5D.</div>}
     </section>
 
     <section className="app-form-section app-ai-section">
       <div><h2>3. Textos de divulgação</h2><p className="app-form-help">O backend tenta o Workers AI gratuito da Cloudflare. Se houver limite ou indisponibilidade, retorna automaticamente um template IMOB.</p></div>
-      <div className="app-ai-text-actions">{textActions.map((action) => <button key={action.kind} type="button" onClick={() => void generateText(action.kind)} disabled={!canUpdate || Boolean(textBusy)}><strong>{textBusy === action.kind ? "Gerando..." : action.label}</strong><span>{action.description}</span></button>)}</div>
+      <div className="app-ai-text-actions">{textActions.map((action) => <button key={action.kind} type="button" onClick={() => void generateText(action.kind)} disabled={!canUpdate || Boolean(textBusy) || aiRuntimeLoading || Boolean(aiRuntimeError)}><strong>{textBusy === action.kind ? "Gerando..." : action.label}</strong><span>{action.description}</span></button>)}</div>
       {!canUpdate && <div className="app-inline-error">Você precisa de permissão para editar o imóvel antes de gerar conteúdo.</div>}
       {textError && <div className="app-inline-error">{textError}</div>}
       {textResult && <div className="app-ai-text-result"><header><strong>Conteúdo gerado</strong><span>{textResult.source === "cloudflare" ? "Workers AI" : "Fallback IMOB"}</span></header><textarea readOnly rows={8} value={textResult.text}/><div><button type="button" className="app-secondary-button" onClick={() => void navigator.clipboard?.writeText(textResult.text)}>Copiar texto</button>{textResult.source === "template" && <small>O conteúdo foi produzido sem chamada de IA externa.</small>}</div></div>}
@@ -456,7 +538,7 @@ export function PropertyAiStudioPanel({
         <div className="app-ai-reel-customization__header">
           <div>
             <strong>Personalização comercial</strong>
-            <span>Os campos abaixo alteram somente este Reel e não modificam o cadastro do imóvel.</span>
+            <span>Os campos abaixo partem do padrão da imobiliária e alteram somente esta geração.</span>
           </div>
           <label className="app-ai-reel-brand-toggle">
             <input
@@ -520,7 +602,7 @@ export function PropertyAiStudioPanel({
           <strong>{Math.min(images.length, 6)} foto(s) + CTA final</strong>
           <span>Ordem da galeria · aproximadamente {reelLiteEstimatedDuration(Math.min(images.length, 6)).toFixed(1)} s · sem custo de API visual</span>
         </div>
-        <button type="button" className="app-primary-button" onClick={() => void generateReelLite()} disabled={reelBusy || images.length === 0 || !reelSupport.supported}>
+        <button type="button" className="app-primary-button" onClick={() => void generateReelLite()} disabled={reelBusy || images.length === 0 || !reelSupport.supported || aiRuntimeLoading || Boolean(aiRuntimeError) || aiRuntime?.quota.remaining === 0}>
           {reelBusy ? "Gerando MP4..." : reelResult ? "Gerar novamente" : "Gerar Reel Lite MP4"}
         </button>
       </div>

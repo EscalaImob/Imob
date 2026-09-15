@@ -111,3 +111,32 @@ export async function createPlatformAccessKey(input: { cpf: string; expiresInDay
 export async function revokePlatformAccessKey(id: string): Promise<PlatformAccessKey> {
   return platformRequest(`/platform/access-keys/${encodeURIComponent(id)}/revoke`, { method: "POST" });
 }
+
+export interface PlatformAiStudioOrganization {
+  organizationId: string;
+  organizationName: string;
+  enabled: boolean;
+  planCode: string;
+  monthlyReelLimit: number | null;
+  currentMonthUsage: number;
+}
+
+export interface PlatformAiStudioOrganizationUpdate {
+  enabled: boolean;
+  planCode: string;
+  monthlyReelLimit: number | null;
+}
+
+export async function listPlatformAiStudioOrganizations(): Promise<PlatformAiStudioOrganization[]> {
+  return platformRequest("/platform/ai-studio/organizations");
+}
+
+export async function updatePlatformAiStudioOrganization(
+  organizationId: string,
+  input: PlatformAiStudioOrganizationUpdate,
+): Promise<PlatformAiStudioOrganization> {
+  return platformRequest(`/platform/ai-studio/organizations/${encodeURIComponent(organizationId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}

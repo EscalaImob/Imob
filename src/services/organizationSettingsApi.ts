@@ -147,6 +147,40 @@ export async function removeOrganizationIdentityLogo(organizationId: string): Pr
   return tenantRequest(organizationId, "/organization/identity/logo", { method: "DELETE" });
 }
 
+export type OrganizationAiStudioReelTemplate = "editorial" | "impact";
+
+export interface OrganizationAiStudioReelDefaults {
+  defaultTemplate: OrganizationAiStudioReelTemplate;
+  soundtrack: boolean;
+  useOrganizationBrand: boolean;
+  headline: string | null;
+  ctaText: string;
+  supportText: string | null;
+  showPrice: boolean;
+  showLocation: boolean;
+  showSpecs: boolean;
+}
+
+export interface OrganizationAiStudioSettings {
+  enabled: boolean;
+  planCode: string;
+  monthlyReelLimit: number | null;
+  defaults: OrganizationAiStudioReelDefaults;
+}
+
+export type OrganizationAiStudioSettingsUpdate = OrganizationAiStudioReelDefaults;
+
+export async function getOrganizationAiStudioSettings(organizationId: string): Promise<OrganizationAiStudioSettings> {
+  return tenantRequest(organizationId, "/organization/ai-studio-settings");
+}
+
+export async function updateOrganizationAiStudioSettings(
+  organizationId: string,
+  input: OrganizationAiStudioSettingsUpdate,
+): Promise<OrganizationAiStudioSettings> {
+  return tenantRequest(organizationId, "/organization/ai-studio-settings", { method: "PATCH", body: JSON.stringify(input) });
+}
+
 export type OrganizationPropertyTypeCode = "apartment" | "house" | "commercial" | "land" | "rural" | "warehouse" | "building" | "room" | "other";
 export type OrganizationPropertyPurpose = "sale" | "rent" | "sale_rent";
 export type OrganizationPropertyAreaUnit = "m2" | "ha";

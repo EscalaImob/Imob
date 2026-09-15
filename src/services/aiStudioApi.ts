@@ -4,11 +4,46 @@ import { AppApiError } from "./appApi";
 const REQUEST_TIMEOUT_MS = 25_000;
 
 export type AiStudioTextKind = "property_description" | "instagram_caption" | "whatsapp_message" | "cta";
+export type AiStudioReelTemplate = "editorial" | "impact";
+
 export interface AiStudioTextResult {
   kind: AiStudioTextKind;
   text: string;
   source: "cloudflare" | "template";
   model: string | null;
+}
+
+export interface AiStudioReelDefaults {
+  defaultTemplate: AiStudioReelTemplate;
+  soundtrack: boolean;
+  useOrganizationBrand: boolean;
+  headline: string | null;
+  ctaText: string;
+  supportText: string | null;
+  showPrice: boolean;
+  showLocation: boolean;
+  showSpecs: boolean;
+}
+
+export interface AiStudioQuota {
+  planCode: string;
+  monthlyLimit: number | null;
+  used: number;
+  remaining: number | null;
+  period: string;
+}
+
+export interface AiStudioRuntime {
+  enabled: boolean;
+  defaults: AiStudioReelDefaults;
+  quota: AiStudioQuota;
+}
+
+export interface AiStudioReelUsageInput {
+  generationId: string;
+  template: AiStudioReelTemplate;
+  audioIncluded: boolean;
+  imageCount: number;
 }
 
 function apiBase(): string {
@@ -17,43 +52,65 @@ function apiBase(): string {
   return value.replace(/\/+$/u, "");
 }
 
-export async function generatePropertyMarketingText(
-  organizationId: string,
-  propertyId: string,
-  kind: AiStudioTextKind,
-): Promise<AiStudioTextResult> {
+async function aiStudioRequest<T>(organizationId: string, path: string, init: RequestInit = {}): Promise<T> {
   const session = await ensureValidAuthSession();
   if (!session) throw new AppApiError("Sua sessão expirou. Entre novamente.", "UNAUTHORIZED", 401);
   const controller = new AbortController();
   const timeout = globalThis.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(`${apiBase()}/portfolio/properties/${encodeURIComponent(propertyId)}/ai/text`, {
-      method: "POST",
+    const response = await fetch(`${apiBase()}${path}`, {
+      ...init,
       headers: {
         authorization: `Bearer ${session.accessToken}`,
         "x-organization-id": organizationId,
-        "content-type": "application/json",
+        ...(init.body ? { "content-type": "application/json" } : {}),
+        ...(init.headers ?? {}),
       },
-      body: JSON.stringify({ kind }),
       signal: controller.signal,
     });
     let payload: unknown = null;
     try { payload = await response.json(); } catch { payload = null; }
-    const body = payload as { success?: boolean; data?: AiStudioTextResult; error?: { code?: string; message?: string } } | null;
+    const body = payload as { success?: boolean; data?: T; error?: { code?: string; message?: string } } | null;
     if (!response.ok) {
-      throw new AppApiError(body?.error?.message || "Não foi possível gerar o conteúdo.", body?.error?.code || "API_ERROR", response.status);
+      throw new AppApiError(body?.error?.message || "Não foi possível concluir a operação do Estúdio IA.", body?.error?.code || "API_ERROR", response.status);
     }
-    if (body?.success !== true || !body.data || typeof body.data.text !== "string") {
+    if (body?.success !== true || body.data === undefined) {
       throw new AppApiError("Recebemos uma resposta inesperada do Estúdio IA.", "INVALID_API_RESPONSE", response.status);
     }
     return body.data;
   } catch (error) {
     if (error instanceof AppApiError) throw error;
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new AppApiError("A geração demorou mais que o esperado.", "REQUEST_TIMEOUT");
+      throw new AppApiError("O Estúdio IA demorou mais que o esperado para responder.", "REQUEST_TIMEOUT");
     }
     throw new AppApiError("Não foi possível conectar ao Estúdio IA.", "NETWORK_ERROR");
   } finally {
     globalThis.clearTimeout(timeout);
   }
+}
+
+export async function getAiStudioRuntime(organizationId: string): Promise<AiStudioRuntime> {
+  return aiStudioRequest(organizationId, "/ai-studio/runtime");
+}
+
+export async function recordAiStudioReelUsage(
+  organizationId: string,
+  propertyId: string,
+  input: AiStudioReelUsageInput,
+): Promise<AiStudioRuntime> {
+  return aiStudioRequest(organizationId, `/portfolio/properties/${encodeURIComponent(propertyId)}/ai/reel-usage`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function generatePropertyMarketingText(
+  organizationId: string,
+  propertyId: string,
+  kind: AiStudioTextKind,
+): Promise<AiStudioTextResult> {
+  return aiStudioRequest(organizationId, `/portfolio/properties/${encodeURIComponent(propertyId)}/ai/text`, {
+    method: "POST",
+    body: JSON.stringify({ kind }),
+  });
 }
