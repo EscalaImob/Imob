@@ -34,6 +34,25 @@ interface PendingRequest<T> {
   onProgress?: (progress: WorkerProgress) => void;
 }
 
+interface ImagePayload {
+  data: ArrayBuffer;
+  contentType: string;
+}
+
+async function loadImagePayload(imageUrl: string): Promise<ImagePayload> {
+  let response: Response;
+  try {
+    response = await fetch(imageUrl, { cache: "no-store" });
+  } catch {
+    throw new Error("IMAGE_FETCH_NETWORK_ERROR");
+  }
+  if (!response.ok) throw new Error(`IMAGE_FETCH_FAILED_${response.status}`);
+  const data = await response.arrayBuffer();
+  if (data.byteLength === 0) throw new Error("IMAGE_FETCH_EMPTY");
+  const contentType = response.headers.get("content-type")?.split(";")[0]?.trim() || "image/jpeg";
+  return { data, contentType };
+}
+
 const labelMap: Record<string, { category: PropertyPhotoCategory; label: string }> = {
   "the front exterior facade of a house or residential building": { category: "facade", label: "Fachada" },
   "the interior of a living room": { category: "living_room", label: "Sala" },
@@ -116,8 +135,9 @@ export async function classifyPropertyPhoto(
   imageUrl: string,
   onProgress?: (progress: WorkerProgress) => void,
 ): Promise<PropertyPhotoClassification> {
+  const image = await loadImagePayload(imageUrl);
   const message = await request<{ result?: unknown }>(
-    { type: "classify", imageUrl },
+    { type: "classify", imageData: image.data, contentType: image.contentType },
     onProgress,
   );
   if (!Array.isArray(message.result) || message.result.length === 0) throw new Error("CLASSIFICATION_EMPTY");
@@ -141,8 +161,9 @@ export async function estimatePropertyPhotoDepth(
   imageUrl: string,
   onProgress?: (progress: WorkerProgress) => void,
 ): Promise<PropertyDepthMap> {
+  const image = await loadImagePayload(imageUrl);
   const message = await request<{ data?: unknown; width?: unknown; height?: unknown }>(
-    { type: "depth", imageUrl },
+    { type: "depth", imageData: image.data, contentType: image.contentType },
     onProgress,
   );
   if (!(message.data instanceof ArrayBuffer) || typeof message.width !== "number" || typeof message.height !== "number") {

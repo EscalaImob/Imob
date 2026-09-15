@@ -1,6 +1,6 @@
 type VisionRequest =
-  | { id: string; type: "classify"; imageUrl: string }
-  | { id: string; type: "depth"; imageUrl: string };
+  | { id: string; type: "classify"; imageData: ArrayBuffer; contentType: string }
+  | { id: string; type: "depth"; imageData: ArrayBuffer; contentType: string };
 
 type ProgressPayload = {
   status?: string;
@@ -24,7 +24,10 @@ type WorkerScope = {
 };
 
 const scope = globalThis as unknown as WorkerScope;
-const TRANSFORMERS_ESM = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/+esm";
+const TRANSFORMERS_ESM_CANDIDATES = [
+  "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/+esm",
+  "https://esm.sh/@huggingface/transformers@3.8.1?bundle",
+] as const;
 const CLASSIFICATION_MODEL = "Xenova/siglip-base-patch16-224";
 const DEPTH_MODEL = "onnx-community/depth-anything-v2-small";
 const labels = [
@@ -44,7 +47,17 @@ let depthPromise: Promise<PipelineCallable> | null = null;
 
 function transformers(): Promise<TransformersModule> {
   if (!transformersPromise) {
-    transformersPromise = import(/* @vite-ignore */ TRANSFORMERS_ESM) as Promise<TransformersModule>;
+    transformersPromise = (async () => {
+      let lastError: unknown;
+      for (const source of TRANSFORMERS_ESM_CANDIDATES) {
+        try {
+          return await import(/* @vite-ignore */ source) as TransformersModule;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      throw lastError instanceof Error ? lastError : new Error("TRANSFORMERS_IMPORT_FAILED");
+    })();
   }
   return transformersPromise;
 }
@@ -114,23 +127,45 @@ function depthPayload(value: unknown): { data: Uint8Array; width: number; height
   return { data: Uint8Array.from(pixelData), width: raw.width, height: raw.height };
 }
 
+async function withLocalImage<T>(
+  request: VisionRequest,
+  operation: (imageUrl: string) => Promise<T>,
+): Promise<T> {
+  if (!(request.imageData instanceof ArrayBuffer) || request.imageData.byteLength === 0) {
+    throw new Error("IMAGE_DATA_INVALID");
+  }
+  const blob = new Blob([request.imageData], { type: request.contentType || "image/jpeg" });
+  const imageUrl = URL.createObjectURL(blob);
+  try {
+    return await operation(imageUrl);
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
+}
+
 scope.onmessage = (event) => {
   const request = event.data;
   void (async () => {
     try {
       if (request.type === "classify") {
         const pipe = await classifier(request.id);
-        const result = normalizedClassification(await pipe(
-          request.imageUrl,
-          labels,
-          { hypothesis_template: "{}" },
+        const result = normalizedClassification(await withLocalImage(
+          request,
+          (imageUrl) => pipe(
+            imageUrl,
+            labels,
+            { hypothesis_template: "{}" },
+          ),
         ));
         scope.postMessage({ id: request.id, type: "classification", result });
         return;
       }
 
       const pipe = await depthEstimator(request.id);
-      const result = depthPayload(await pipe(request.imageUrl));
+      const result = depthPayload(await withLocalImage(
+        request,
+        (imageUrl) => pipe(imageUrl),
+      ));
       const buffer = result.data.buffer.slice(
         result.data.byteOffset,
         result.data.byteOffset + result.data.byteLength,

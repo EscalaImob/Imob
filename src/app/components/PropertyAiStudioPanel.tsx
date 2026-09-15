@@ -200,14 +200,32 @@ export function PropertyAiStudioPanel({ organizationId, propertyId, canUpdate, h
       const freshImages = await listPropertyImages(organizationId, propertyId);
       setImages(freshImages);
       const next: AnalysisByImage = {};
+      const failedImages: string[] = [];
       for (const image of freshImages) {
-        // A primeira carga pode falhar enquanto CDN/cache/modelo ainda estão aquecendo.
-        // Faz até três tentativas com pequeno backoff antes de mostrar erro ao usuário.
-        next[image.id] = await classifyPhotoWithRetry(image.viewUrl, setVisionProgress);
+        try {
+          // A imagem é baixada no contexto da página e enviada ao worker como bytes.
+          // Assim, o modelo não depende de refazer fetch da URL assinada dentro do worker.
+          next[image.id] = await classifyPhotoWithRetry(image.viewUrl, setVisionProgress);
+        } catch (error) {
+          failedImages.push(image.originalName);
+          console.warn("[Estúdio IMOB] Falha na classificação local", {
+            imageId: image.id,
+            imageName: image.originalName,
+            error: error instanceof Error ? error.message : "CLASSIFICATION_FAILED",
+          });
+        }
         setAnalysis({ ...next });
       }
-    } catch {
-      setVisionError("Não foi possível concluir a análise local. Tente novamente; não é necessário remover ou reenviar a imagem.");
+      if (failedImages.length > 0) {
+        setVisionError(
+          failedImages.length === freshImages.length
+            ? "Não foi possível analisar as fotos localmente. Tente novamente; não é necessário remover ou reenviar as imagens."
+            : `A análise concluiu parcialmente. ${failedImages.length} foto(s) não puderam ser classificadas; tente novamente para completar.`,
+        );
+      }
+    } catch (error) {
+      console.warn("[Estúdio IMOB] Falha ao preparar a análise local", error);
+      setVisionError("Não foi possível preparar a análise local. Tente novamente; não é necessário remover ou reenviar a imagem.");
     } finally {
       setVisionBusy(false);
       setVisionProgress(null);
