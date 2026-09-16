@@ -213,8 +213,8 @@ export function PlatformAdminPage() {
 
   return (
     <section className="platform-admin-page">
-      <header className="platform-admin-page__intro">
-        <div><span>PLATAFORMA</span><h1>Administração comercial</h1><p>Autorize novos cadastros por CPF sem misturar o controle global com a administração das imobiliárias.</p></div>
+      <header className="platform-admin-page__intro" id="platform-overview">
+        <div><span>PLATAFORMA</span><h1>Console da plataforma</h1><p>Operação global da Escala IMOB. Este contexto não representa nenhuma imobiliária e não concede acesso implícito aos dados comerciais dos tenants.</p></div>
       </header>
 
       {message && <div className={`platform-admin-alert is-${message.tone}`} role="status">{message.text}</div>}
@@ -223,8 +223,8 @@ export function PlatformAdminPage() {
         {metricItems.map(([label, value]) => <article key={String(label)}><span>{label}</span><strong>{value}</strong></article>)}
       </div>
 
-      <article className="platform-admin-card">
-        <header><div><h2>Estúdio IA por organização</h2><p>Política do Reel Lite: Trial 1, Essencial 3, Profissional 10, Imobiliária 30 e Enterprise com franquia customizada.</p></div></header>
+      <article className="platform-admin-card" id="platform-organizations">
+        <header><div><h2>Organizações e planos do Estúdio IA</h2><p>Política do Reel Lite: Trial 1, Essencial 3, Profissional 10, Imobiliária 30 e Enterprise com franquia customizada.</p></div></header>
         <div className="platform-admin-table-wrap">
           <table className="platform-admin-table platform-admin-ai-table">
             <thead><tr><th>Organização</th><th>Ativo</th><th>Plano comercial</th><th>Uso no mês</th><th>Franquia mensal</th><th /></tr></thead>
@@ -259,7 +259,7 @@ export function PlatformAdminPage() {
         </div>
       </article>
 
-      <article className="platform-admin-card platform-admin-telemetry">
+      <article className="platform-admin-card platform-admin-telemetry" id="platform-telemetry">
         <header>
           <div><h2>Telemetria do Reel Lite</h2><p>Desempenho real da geração local para decidir compatibilidade, limites e próximos investimentos do MVP.</p></div>
           <label className="platform-admin-telemetry-range"><span>Janela</span><select value={telemetryDays} disabled={telemetryLoading} onChange={(event) => void handleTelemetryDays(Number(event.target.value))}><option value={7}>7 dias</option><option value={30}>30 dias</option><option value={60}>60 dias</option><option value={90}>90 dias</option></select></label>
@@ -284,7 +284,7 @@ export function PlatformAdminPage() {
         </> : <div className="platform-admin-empty">Sem telemetria disponível.</div>}
       </article>
 
-      <article className="platform-admin-card">
+      <article className="platform-admin-card" id="platform-access-keys">
         <header><div><h2>Emitir chave de acesso</h2><p>O valor completo aparece somente nesta emissão. O backend armazena apenas o hash.</p></div></header>
         <div className="platform-admin-form">
           <label><span>CPF *</span><input value={cpf} onChange={(event) => setCpf(event.target.value.replace(/[^\d.-]/g, "").slice(0, 14))} placeholder="000.000.000-00" inputMode="numeric" /></label>

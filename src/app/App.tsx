@@ -89,6 +89,12 @@ import {
   saveActiveOrganizationId,
   saveSidebarCollapsed,
 } from "./preferences";
+import {
+  clearWorkspaceMode,
+  readWorkspaceMode,
+  saveWorkspaceMode,
+  type WorkspaceMode,
+} from "../workspaceMode";
 
 type NavIcon = ComponentType<SVGProps<SVGSVGElement>>;
 type PageKey =
@@ -482,7 +488,7 @@ function formattedDate(timezone: string | undefined): string {
 }
 
 function roleLabel(data: AppBootstrapResult): string {
-  if (data.platformPermissions.includes("platform.access_keys.manage")) {
+  if (data.platformPermissions.length > 0) {
     return "Admin da plataforma";
   }
   return data.roles[0]?.name ?? "Membro da organização";
@@ -567,6 +573,7 @@ function AccessError({
             className="is-secondary"
             onClick={() => {
               clearAuthSession();
+              clearWorkspaceMode();
               globalThis.location.replace("/login/");
             }}
           >
@@ -588,6 +595,159 @@ function ModuleAccessDenied({ title }: { title: string }) {
         organização.
       </p>
     </section>
+  );
+}
+
+function PlatformConsoleShell({
+  bootstrap,
+  canManage,
+  onLogout,
+  onOpenOrganization,
+}: {
+  bootstrap: AppBootstrapResult;
+  canManage: boolean;
+  onLogout: () => void;
+  onOpenOrganization: (() => void) | null;
+}) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const platformItems = [
+    { label: "Visão geral", href: "/app/admin/#platform-overview", icon: GridIcon },
+    { label: "Organizações e planos", href: "/app/admin/#platform-organizations", icon: BuildingIcon },
+    { label: "Telemetria", href: "/app/admin/#platform-telemetry", icon: ChartIcon },
+    { label: "Chaves de acesso", href: "/app/admin/#platform-access-keys", icon: DocumentIcon },
+  ];
+
+  return (
+    <div className={`platform-console-layout${mobileOpen ? " is-mobile-open" : ""}`}>
+      <button
+        className="platform-console-backdrop"
+        type="button"
+        aria-label="Fechar menu"
+        onClick={() => setMobileOpen(false)}
+      />
+      <aside className="platform-console-sidebar" aria-label="Console da plataforma">
+        <div className="platform-console-brand">
+          <img src={brandLogo} alt="Escala IMOB" />
+          <div>
+            <strong>Console</strong>
+            <span>Administração da plataforma</span>
+          </div>
+        </div>
+        <div className="platform-console-scope">
+          <GlobeIcon />
+          <div>
+            <strong>Contexto global</strong>
+            <span>Sem tenant selecionado</span>
+          </div>
+        </div>
+        <nav className="platform-console-nav">
+          <p>PLATAFORMA</p>
+          {platformItems.map((item, index) => {
+            const Icon = item.icon;
+            return (
+              <a
+                key={item.href}
+                href={item.href}
+                className={index === 0 ? "is-primary" : ""}
+                onClick={() => setMobileOpen(false)}
+              >
+                <Icon />
+                <span>{item.label}</span>
+              </a>
+            );
+          })}
+        </nav>
+        <div className="platform-console-sidebar__footer">
+          <span>ESCALA IMOB · INTERNO</span>
+          <small>Operação global do SaaS</small>
+        </div>
+      </aside>
+
+      <div className="platform-console-main">
+        <header className="platform-console-topbar">
+          <div className="platform-console-topbar__left">
+            <button
+              className="platform-console-mobile-menu"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label="Abrir menu"
+            >
+              <MenuIcon />
+            </button>
+            <div>
+              <span>Escala IMOB</span>
+              <strong>Administração da Plataforma</strong>
+            </div>
+          </div>
+          <div className="platform-console-topbar__actions">
+            {onOpenOrganization && (
+              <button
+                className="platform-console-tenant-button"
+                type="button"
+                onClick={onOpenOrganization}
+              >
+                <BuildingIcon />
+                Área da organização
+              </button>
+            )}
+            <div className="app-user-menu platform-console-user-menu">
+              <button
+                className="app-user-menu__trigger"
+                type="button"
+                onClick={() => setUserMenuOpen((value) => !value)}
+                aria-expanded={userMenuOpen}
+              >
+                <span className="app-avatar">
+                  {bootstrap.user.avatarUrl ? (
+                    <img src={bootstrap.user.avatarUrl} alt="" />
+                  ) : (
+                    initials(bootstrap.user.displayName)
+                  )}
+                </span>
+                <span className="app-user-menu__name">
+                  {bootstrap.user.firstName || bootstrap.user.displayName}
+                </span>
+                <ChevronIcon />
+              </button>
+              {userMenuOpen && (
+                <div className="app-user-menu__panel">
+                  <div className="app-user-menu__identity">
+                    <strong>{bootstrap.user.displayName}</strong>
+                    <span>{bootstrap.user.email}</span>
+                    <small>Admin da plataforma</small>
+                  </div>
+                  <button type="button" onClick={onLogout}>
+                    <LogoutIcon /> Sair
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </header>
+
+        <main className="platform-console-content">
+          <section className="platform-console-boundary" aria-label="Escopo administrativo">
+            <GlobeIcon />
+            <div>
+              <strong>Administração global isolada das organizações</strong>
+              <span>
+                Este console administra a Escala IMOB como SaaS. Nenhum dado comercial de uma imobiliária é carregado sem entrada explícita na área daquela organização.
+              </span>
+            </div>
+          </section>
+          {canManage ? (
+            <PlatformAdminPage />
+          ) : (
+            <section className="platform-console-access-denied">
+              <GlobeIcon />
+              <h1>Acesso de plataforma indisponível</h1>
+              <p>Seu usuário não possui as permissões administrativas necessárias para este console.</p>
+            </section>
+          )}
+        </main>
+      </div>
+    </div>
   );
 }
 
@@ -1361,6 +1521,9 @@ export function App() {
   const [route, setRoute] = useState(
     () => `${globalThis.location.pathname}${globalThis.location.search}`,
   );
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode | null>(() =>
+    readWorkspaceMode(),
+  );
   const page = useMemo(() => currentPage(), [route]);
 
   const load = useCallback(async (requestedOrganizationId?: string | null) => {
@@ -1478,6 +1641,36 @@ export function App() {
       );
   }, [bootstrap?.activeOrganization]);
 
+  useEffect(() => {
+    if (!bootstrap) return;
+    const platformAccess = bootstrap.platformPermissions.length > 0;
+    if (!platformAccess) {
+      if (workspaceMode !== "organization") {
+        saveWorkspaceMode("organization");
+        setWorkspaceMode("organization");
+      }
+      return;
+    }
+
+    if (page.key === "platformAdmin") {
+      if (workspaceMode !== "platform") {
+        saveWorkspaceMode("platform");
+        setWorkspaceMode("platform");
+      }
+      return;
+    }
+
+    if (workspaceMode === "organization" && bootstrap.activeOrganization) return;
+
+    saveWorkspaceMode("platform");
+    if (workspaceMode !== "platform") setWorkspaceMode("platform");
+    const destination = "/app/admin/";
+    if (globalThis.location.pathname !== destination) {
+      globalThis.history.replaceState({}, "", destination);
+      setRoute(destination);
+    }
+  }, [bootstrap, page.key, workspaceMode]);
+
   const activeOrganization = bootstrap?.activeOrganization ?? null;
 
   async function handleOrganizationChange(organizationId: string) {
@@ -1541,8 +1734,20 @@ export function App() {
 
   function handleLogout() {
     clearAuthSession();
+    clearWorkspaceMode();
     saveActiveOrganizationId(null);
     globalThis.location.replace("/login/");
+  }
+
+  function handleOpenOrganizationWorkspace() {
+    if (!bootstrap?.activeOrganization) return;
+    saveWorkspaceMode("organization");
+    setWorkspaceMode("organization");
+    const destination = "/app/";
+    globalThis.history.pushState({}, "", destination);
+    setRoute(destination);
+    setUserMenuOpen(false);
+    setMobileMenuOpen(false);
   }
 
   if (loading) return <LoadingScreen />;
@@ -1558,10 +1763,28 @@ export function App() {
     );
   if (!bootstrap) return null;
 
+  const platformAccess = bootstrap.platformPermissions.length > 0;
   const canManagePlatform = hasPlatformPermission(
     bootstrap,
     "platform.access_keys.manage",
   );
+  const platformConsoleActive =
+    platformAccess &&
+    (page.key === "platformAdmin" || workspaceMode !== "organization" || !activeOrganization);
+
+  if (platformConsoleActive) {
+    return (
+      <PlatformConsoleShell
+        bootstrap={bootstrap}
+        canManage={canManagePlatform}
+        onLogout={handleLogout}
+        onOpenOrganization={
+          activeOrganization ? handleOpenOrganizationWorkspace : null
+        }
+      />
+    );
+  }
+
   const canCreateContact = hasPermission(bootstrap, "crm.contacts.create");
   const canCreateOpportunity =
     hasPermission(bootstrap, "crm.opportunities.create") &&

@@ -10,6 +10,7 @@ import {
   resetPassword,
 } from "../services/authApi";
 import { clearAuthSession, readAuthSession, saveAuthSession } from "./session";
+import { saveWorkspaceMode } from "../workspaceMode";
 
 type AuthPage = "login" | "verify" | "forgot" | "reset";
 
@@ -102,7 +103,9 @@ function LoginPage() {
       setPassword("");
 
       if (result.onboarding.completed) {
-        globalThis.location.replace("/app/");
+        const mode = result.user.platformAccess ? "platform" : "organization";
+        saveWorkspaceMode(mode);
+        globalThis.location.replace(result.user.platformAccess ? "/app/admin/" : "/app/");
         return;
       }
 
