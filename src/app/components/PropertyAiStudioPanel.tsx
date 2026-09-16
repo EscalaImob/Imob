@@ -44,6 +44,7 @@ import {
   type PropertyPhotoQuality,
   type PropertyVisionBackend,
 } from "../ai/browserVision";
+import { PropertyPhotoAdjuster } from "./PropertyPhotoAdjuster";
 
 interface Props {
   organizationId: string;
@@ -576,6 +577,14 @@ export function PropertyAiStudioPanel({
     setVisionError(null);
   }
 
+  function handleAdjustedImages(updated: PropertyImageItem[]) {
+    setImages(updated);
+    setReelSelectionReady(false);
+    setSelectedForReelIds([]);
+    setDepth(null);
+    setVisionError(null);
+  }
+
   function toggleReelPhoto(imageId: string, checked: boolean) {
     const defaultSelection = images.slice(0, MAX_REEL_IMAGES).map((image) => image.id);
     setSelectedForReelIds((current) => {
@@ -973,13 +982,25 @@ export function PropertyAiStudioPanel({
     </section>
 
     <section className="app-form-section app-ai-section">
-      <div className="app-section-title-row"><div><h2>2. Profundidade e movimento 2.5D</h2><p className="app-form-help">Depth Anything V2 calcula um mapa de profundidade local para preparar o efeito de câmera do Reel Lite.</p></div><span className="app-ai-runtime-badge">{visionBackend === "webgpu" ? "WebGPU em uso" : visionBackend === "wasm" ? "WASM em uso" : visionBackend === "mixed" ? "WebGPU + fallback WASM" : support.webGpu ? "WebGPU será priorizado" : "WASM compatível"}</span></div>
+      <div><h2>2. Melhoria básica local da foto</h2><p className="app-form-help">Ajuste brilho, contraste, nitidez e recorte diretamente no navegador. Ao salvar, o Estúdio cria uma nova imagem na galeria e preserva a foto original.</p></div>
+      <PropertyPhotoAdjuster
+        organizationId={organizationId}
+        propertyId={propertyId}
+        images={images}
+        quality={quality}
+        canUpdate={canUpdate}
+        onImagesChanged={handleAdjustedImages}
+      />
+    </section>
+
+    <section className="app-form-section app-ai-section">
+      <div className="app-section-title-row"><div><h2>3. Profundidade e movimento 2.5D</h2><p className="app-form-help">Depth Anything V2 calcula um mapa de profundidade local para preparar o efeito de câmera do Reel Lite.</p></div><span className="app-ai-runtime-badge">{visionBackend === "webgpu" ? "WebGPU em uso" : visionBackend === "wasm" ? "WASM em uso" : visionBackend === "mixed" ? "WebGPU + fallback WASM" : support.webGpu ? "WebGPU será priorizado" : "WASM compatível"}</span></div>
       {images.length > 0 && <div className="app-ai-depth-controls"><label><span>Foto para testar</span><select value={depthImageId ?? ""} onChange={(event: ChangeEvent<HTMLSelectElement>) => { setDepthImageId(event.target.value || null); setDepth(null); }}>{images.map((image, index) => <option key={image.id} value={image.id}>{index + 1}. {analysis[image.id]?.label ?? image.originalName}</option>)}</select></label><button type="button" className="app-secondary-button" onClick={() => void calculateDepth()} disabled={visionBusy || !selectedDepthImage || Boolean(aiRuntimeError)}>{depth ? "Recalcular profundidade" : "Calcular profundidade"}</button></div>}
       {depth && selectedDepthImage ? <DepthParallaxPreview imageUrl={selectedDepthImage.viewUrl} depth={depth}/> : <div className="app-soft-empty">Escolha uma foto e calcule a profundidade para testar o movimento 2.5D.</div>}
     </section>
 
     <section className="app-form-section app-ai-section">
-      <div><h2>3. Textos de divulgação</h2><p className="app-form-help">O backend tenta o Workers AI gratuito da Cloudflare. Se houver limite ou indisponibilidade, retorna automaticamente um template IMOB.</p></div>
+      <div><h2>4. Textos de divulgação</h2><p className="app-form-help">O backend tenta o Workers AI gratuito da Cloudflare. Se houver limite ou indisponibilidade, retorna automaticamente um template IMOB.</p></div>
       <div className="app-ai-text-actions">{textActions.map((action) => <button key={action.kind} type="button" onClick={() => void generateText(action.kind)} disabled={!canUpdate || Boolean(textBusy) || aiRuntimeLoading || Boolean(aiRuntimeError)}><strong>{textBusy === action.kind ? "Gerando..." : action.label}</strong><span>{action.description}</span></button>)}</div>
       {!canUpdate && <div className="app-inline-error">Você precisa de permissão para editar o imóvel antes de gerar conteúdo.</div>}
       {textError && <div className="app-inline-error">{textError}</div>}
@@ -989,7 +1010,7 @@ export function PropertyAiStudioPanel({
     <section className="app-form-section app-ai-section app-ai-reel-section">
       <div className="app-section-title-row">
         <div>
-          <h2>4. Reel Lite em MP4</h2>
+          <h2>5. Reel Lite em MP4</h2>
           <p className="app-form-help">Gera um vídeo vertical 9:16 no próprio navegador, usando até {MAX_REEL_IMAGES} fotos selecionadas, movimento 2.5D quando a profundidade estiver disponível e composição da Escala IMOB.</p>
         </div>
         <span className="app-ai-runtime-badge">720 × 1280 · MP4</span>
