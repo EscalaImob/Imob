@@ -13,6 +13,34 @@ export interface PlatformOverview {
   activeAccessKeys: number;
 }
 
+export type PlatformUserStatus = "active" | "suspended" | "archived";
+
+export interface PlatformUser {
+  id: string;
+  email: string;
+  displayName: string;
+  status: PlatformUserStatus;
+  createdAt: string;
+  platformRoles: string[];
+  activeOrganizations: Array<{
+    organizationId: string;
+    organizationName: string;
+  }>;
+}
+
+export interface PlatformUserFilters {
+  q?: string;
+  status?: PlatformUserStatus | "all";
+}
+
+export async function listPlatformUsers(filters: PlatformUserFilters = {}): Promise<PlatformUser[]> {
+  const params = new URLSearchParams();
+  if (filters.q?.trim()) params.set("q", filters.q.trim());
+  if (filters.status && filters.status !== "all") params.set("status", filters.status);
+  params.set("limit", "100");
+  return platformRequest(`/platform/users?${params.toString()}`);
+}
+
 export interface PlatformAccessKey {
   id: string;
   cpfMasked: string;

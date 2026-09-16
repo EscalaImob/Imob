@@ -6,6 +6,7 @@ import {
   getPlatformOverview,
   listPlatformAccessKeys,
   listPlatformAiStudioOrganizations,
+  listPlatformUsers,
   revokePlatformAccessKey,
   updatePlatformAiStudioOrganization,
   type PlatformAccessKey,
@@ -15,7 +16,16 @@ import {
   type PlatformAiStudioOrganizationUpdate,
   type PlatformAiStudioTelemetry,
   type PlatformOverview,
+  type PlatformUser,
+  type PlatformUserFilters,
+  type PlatformUserStatus,
 } from "../../services/platformAdminApi";
+
+const userStatusLabels: Record<PlatformUserStatus, string> = {
+  active: "Ativo",
+  suspended: "Suspenso",
+  archived: "Arquivado",
+};
 
 const statusLabels: Record<PlatformAccessKeyStatus, string> = {
   active: "Disponível",
@@ -81,6 +91,9 @@ function aiStudioDraft(item: PlatformAiStudioOrganization): AiStudioDraft {
 
 export function PlatformAdminPage() {
   const [overview, setOverview] = useState<PlatformOverview | null>(null);
+  const [platformUsers, setPlatformUsers] = useState<PlatformUser[]>([]);
+  const [userFilters, setUserFilters] = useState<PlatformUserFilters>({ status: "all" });
+  const [usersLoading, setUsersLoading] = useState(false);
   const [keys, setKeys] = useState<PlatformAccessKey[]>([]);
   const [aiOrganizations, setAiOrganizations] = useState<PlatformAiStudioOrganization[]>([]);
   const [aiDrafts, setAiDrafts] = useState<Record<string, AiStudioDraft>>({});
@@ -100,8 +113,9 @@ export function PlatformAdminPage() {
     setLoading(true);
     setMessage(null);
 
-    const [overviewResult, accessKeysResult, aiStudioOrganizationsResult, telemetryResult] = await Promise.allSettled([
+    const [overviewResult, usersResult, accessKeysResult, aiStudioOrganizationsResult, telemetryResult] = await Promise.allSettled([
       getPlatformOverview(),
+      listPlatformUsers(),
       listPlatformAccessKeys(nextFilters),
       listPlatformAiStudioOrganizations(),
       getPlatformAiStudioTelemetry(telemetryDays),
@@ -115,6 +129,9 @@ export function PlatformAdminPage() {
 
     if (overviewResult.status === "fulfilled") setOverview(overviewResult.value);
     else { setOverview(null); failureMessage("Visão geral", overviewResult.reason); }
+
+    if (usersResult.status === "fulfilled") setPlatformUsers(usersResult.value);
+    else { setPlatformUsers([]); failureMessage("Usuários", usersResult.reason); }
 
     if (accessKeysResult.status === "fulfilled") setKeys(accessKeysResult.value);
     else { setKeys([]); failureMessage("Chaves de acesso", accessKeysResult.reason); }
@@ -142,6 +159,19 @@ export function PlatformAdminPage() {
   }, [filters, telemetryDays]);
 
   useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleUserFilter() {
+    if (usersLoading) return;
+    setUsersLoading(true);
+    setMessage(null);
+    try {
+      setPlatformUsers(await listPlatformUsers(userFilters));
+    } catch (error) {
+      setMessage({ tone: "error", text: error instanceof AppApiError ? error.message : "Não foi possível carregar os usuários da plataforma." });
+    } finally {
+      setUsersLoading(false);
+    }
+  }
 
   async function handleCreate() {
     if (saving) return;
@@ -238,6 +268,33 @@ export function PlatformAdminPage() {
       <div className="platform-admin-metrics">
         {metricItems.map(([label, value]) => <article key={String(label)}><span>{label}</span><strong>{value}</strong></article>)}
       </div>
+
+      <article className="platform-admin-card" id="platform-users">
+        <header><div><h2>Usuários da plataforma</h2><p>Visão global de contas, acesso administrativo e organizações ativas. Nenhum dado comercial dos tenants é carregado nesta listagem.</p></div></header>
+        <div className="platform-admin-filters platform-admin-user-filters">
+          <input aria-label="Buscar usuário" value={userFilters.q ?? ""} onChange={(event) => setUserFilters((current) => ({ ...current, q: event.target.value }))} placeholder="Nome ou e-mail" />
+          <select aria-label="Status do usuário" value={userFilters.status ?? "all"} onChange={(event) => setUserFilters((current) => ({ ...current, status: event.target.value as PlatformUserStatus | "all" }))}>
+            <option value="all">Todos os status</option><option value="active">Ativos</option><option value="suspended">Suspensos</option><option value="archived">Arquivados</option>
+          </select>
+          <button type="button" onClick={() => void handleUserFilter()} disabled={usersLoading}>{usersLoading ? "Buscando..." : "Filtrar"}</button>
+        </div>
+        <div className="platform-admin-table-wrap">
+          <table className="platform-admin-table platform-admin-users-table">
+            <thead><tr><th>Usuário</th><th>Status</th><th>Acesso global</th><th>Organizações ativas</th><th>Criado em</th></tr></thead>
+            <tbody>
+              {platformUsers.map((user) => <tr key={user.id}>
+                <td><strong>{user.displayName}</strong><small>{user.email}</small></td>
+                <td><span className={`platform-user-status is-${user.status}`}>{userStatusLabels[user.status]}</span></td>
+                <td>{user.platformRoles.includes("platform_admin") ? <span className="platform-user-role is-platform">Admin da plataforma</span> : <span className="platform-user-role">Usuário</span>}</td>
+                <td>{user.activeOrganizations.length > 0 ? <div className="platform-user-organizations">{user.activeOrganizations.map((organization) => <span key={organization.organizationId}>{organization.organizationName}</span>)}</div> : <span className="platform-admin-muted">Sem tenant ativo</span>}</td>
+                <td>{formatDate(user.createdAt)}</td>
+              </tr>)}
+              {!loading && !usersLoading && platformUsers.length === 0 && <tr><td colSpan={5} className="platform-admin-empty">Nenhum usuário encontrado.</td></tr>}
+              {(loading || usersLoading) && platformUsers.length === 0 && <tr><td colSpan={5} className="platform-admin-empty">Carregando usuários...</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </article>
 
       <article className="platform-admin-card" id="platform-organizations">
         <header><div><h2>Organizações e planos do Estúdio IA</h2><p>Política do Reel Lite: Trial 1, Essencial 3, Profissional 10, Imobiliária 30 e Enterprise com franquia customizada.</p></div></header>

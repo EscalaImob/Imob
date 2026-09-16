@@ -614,6 +614,7 @@ function PlatformConsoleShell({
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const platformItems = [
     { label: "Visão geral", href: "/app/admin/#platform-overview", icon: GridIcon },
+    { label: "Usuários", href: "/app/admin/#platform-users", icon: UsersIcon },
     { label: "Organizações e planos", href: "/app/admin/#platform-organizations", icon: BuildingIcon },
     { label: "Telemetria", href: "/app/admin/#platform-telemetry", icon: ChartIcon },
     { label: "Chaves de acesso", href: "/app/admin/#platform-access-keys", icon: DocumentIcon },
