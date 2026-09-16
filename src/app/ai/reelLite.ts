@@ -155,14 +155,14 @@ function supportedMimeType(candidates: readonly string[]): string | null {
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, code: string): Promise<T> {
-  let timeoutId = 0;
+  let timeoutId: ReturnType<typeof globalThis.setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timeoutId = globalThis.setTimeout(() => reject(new Error(code)), timeoutMs);
   });
   try {
     return await Promise.race([promise, timeout]);
   } finally {
-    globalThis.clearTimeout(timeoutId);
+    if (timeoutId !== undefined) globalThis.clearTimeout(timeoutId);
   }
 }
 
@@ -894,20 +894,20 @@ export async function createReelLiteMp4(
     const startedAt = performance.now();
 
     await new Promise<void>((resolve, reject) => {
-      let frameTimer = 0;
+      let frameTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
       let settled = false;
       const frameIntervalMs = 1000 / FPS;
       const timeoutId = globalThis.setTimeout(() => {
         if (settled) return;
         settled = true;
-        if (frameTimer) globalThis.clearTimeout(frameTimer);
+        if (frameTimer !== undefined) globalThis.clearTimeout(frameTimer);
         reject(new Error("REEL_RENDER_TIMEOUT"));
       }, Math.ceil((durationSeconds + 15) * 1000));
 
       const finish = () => {
         if (settled) return;
         settled = true;
-        if (frameTimer) globalThis.clearTimeout(frameTimer);
+        if (frameTimer !== undefined) globalThis.clearTimeout(frameTimer);
         globalThis.clearTimeout(timeoutId);
         resolve();
       };

@@ -47,7 +47,7 @@ interface PendingRequest<T> {
   resolve(value: T): void;
   reject(reason?: unknown): void;
   onProgress?: (progress: WorkerProgress) => void;
-  timeoutId: number;
+  timeoutId: ReturnType<typeof globalThis.setTimeout>;
 }
 
 interface ImagePayload {
