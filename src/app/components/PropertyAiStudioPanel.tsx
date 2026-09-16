@@ -194,6 +194,27 @@ const textActions: Array<{ kind: AiStudioTextKind; label: string; description: s
   { kind: "cta", label: "CTA", description: "Chamada curta para contato ou visita." },
 ];
 
+type MarketingKitResults = Partial<Record<AiStudioTextKind, AiStudioTextResult>>;
+
+function marketingKitDocument(propertyTitle: string, results: MarketingKitResults): string {
+  const title = propertyTitle.trim() || "Imóvel";
+  const sections = textActions.flatMap((action) => {
+    const result = results[action.kind];
+    return result ? [`## ${action.label}\n${result.text.trim()}`] : [];
+  });
+  return [`KIT DE DIVULGAÇÃO · ${title}`, "", ...sections].join("\n\n").trim();
+}
+
+function safeTextFilename(value: string): string {
+  const normalized = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .replace(/[^a-zA-Z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .toLocaleLowerCase("pt-BR");
+  return normalized || "imovel";
+}
+
 
 function progressLabel(progress: { status: string | null; progress: number | null; file: string | null } | null): string | null {
   if (!progress) return null;
@@ -368,6 +389,9 @@ export function PropertyAiStudioPanel({
   const [textBusy, setTextBusy] = useState<AiStudioTextKind | null>(null);
   const [textResult, setTextResult] = useState<AiStudioTextResult | null>(null);
   const [textError, setTextError] = useState<string | null>(null);
+  const [marketingKitBusy, setMarketingKitBusy] = useState(false);
+  const [marketingKitResults, setMarketingKitResults] = useState<MarketingKitResults>({});
+  const [marketingKitError, setMarketingKitError] = useState<string | null>(null);
   const [reelBusy, setReelBusy] = useState(false);
   const [reelProgress, setReelProgress] = useState<ReelLiteProgress | null>(null);
   const [reelError, setReelError] = useState<string | null>(null);
@@ -454,6 +478,10 @@ export function PropertyAiStudioPanel({
     setVisionError(null);
     setVisionBackend(null);
     setLastAnalysisMs(null);
+    setTextResult(null);
+    setTextError(null);
+    setMarketingKitResults({});
+    setMarketingKitError(null);
     setReelAssetError(null);
     setReelFeedbackSentiment(null);
     setReelFeedbackReasons([]);
@@ -926,6 +954,49 @@ export function PropertyAiStudioPanel({
     }
   }
 
+  async function generateMarketingKit() {
+    if (!propertyId || marketingKitBusy || textBusy || !canUpdate || aiRuntimeLoading || aiRuntimeError) return;
+    setMarketingKitBusy(true);
+    setMarketingKitError(null);
+    setMarketingKitResults({});
+    const next: MarketingKitResults = {};
+    const failures: string[] = [];
+    for (const action of textActions) {
+      try {
+        next[action.kind] = await generatePropertyMarketingText(organizationId, propertyId, action.kind);
+        setMarketingKitResults({ ...next });
+      } catch (error) {
+        failures.push(error instanceof AppApiError ? error.message : action.label);
+      }
+    }
+    if (Object.keys(next).length === 0) {
+      setMarketingKitError(failures[0] || "Não foi possível montar o kit de divulgação agora.");
+    } else if (failures.length > 0) {
+      setMarketingKitError(`O kit ficou parcial: ${failures.length} conteúdo(s) não puderam ser gerados. Você pode tentar novamente sem afetar os itens já criados.`);
+    }
+    setMarketingKitBusy(false);
+  }
+
+  async function copyMarketingKit() {
+    const content = marketingKitDocument(propertyTitle, marketingKitResults);
+    if (!content || !navigator.clipboard) return;
+    await navigator.clipboard.writeText(content);
+  }
+
+  function downloadMarketingKit() {
+    const content = marketingKitDocument(propertyTitle, marketingKitResults);
+    if (!content) return;
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `kit-divulgacao-${safeTextFilename(propertyTitle)}.txt`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    globalThis.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
   if (!propertyId) {
     return <div className="app-property-images-save-first"><strong>Salve o imóvel para abrir o Estúdio IA.</strong><p>O MVP usa as fotos e os dados já cadastrados no imóvel.</p></div>;
   }
@@ -936,6 +1007,11 @@ export function PropertyAiStudioPanel({
   const selectedForReel = reelSelectionReady
     ? images.filter((image) => selectedForReelIds.includes(image.id))
     : images.slice(0, MAX_REEL_IMAGES);
+  const marketingKitEntries = textActions.flatMap((action) => {
+    const result = marketingKitResults[action.kind];
+    return result ? [{ action, result }] : [];
+  });
+  const newestSavedReel = reelAssets[0] ?? null;
 
   return <div className="app-ai-studio">
     <section className="app-ai-hero">
@@ -1000,8 +1076,40 @@ export function PropertyAiStudioPanel({
     </section>
 
     <section className="app-form-section app-ai-section">
-      <div><h2>4. Textos de divulgação</h2><p className="app-form-help">O backend tenta o Workers AI gratuito da Cloudflare. Se houver limite ou indisponibilidade, retorna automaticamente um template IMOB.</p></div>
-      <div className="app-ai-text-actions">{textActions.map((action) => <button key={action.kind} type="button" onClick={() => void generateText(action.kind)} disabled={!canUpdate || Boolean(textBusy) || aiRuntimeLoading || Boolean(aiRuntimeError)}><strong>{textBusy === action.kind ? "Gerando..." : action.label}</strong><span>{action.description}</span></button>)}</div>
+      <div><h2>4. Textos e kit de divulgação</h2><p className="app-form-help">O backend tenta o Workers AI gratuito da Cloudflare. Se houver limite ou indisponibilidade, retorna automaticamente um template IMOB.</p></div>
+      <div className="app-ai-marketing-kit-callout">
+        <div>
+          <span className="app-section-eyebrow">Kit completo</span>
+          <strong>Monte o pacote comercial do imóvel em uma ação</strong>
+          <p>Gera descrição, legenda para Instagram, mensagem de WhatsApp e CTA usando os dados salvos do imóvel. O resultado pode ser copiado ou baixado em TXT.</p>
+        </div>
+        <button type="button" className="app-primary-button" onClick={() => void generateMarketingKit()} disabled={!canUpdate || marketingKitBusy || Boolean(textBusy) || aiRuntimeLoading || Boolean(aiRuntimeError)}>
+          {marketingKitBusy ? `Montando kit · ${marketingKitEntries.length}/${textActions.length}` : marketingKitEntries.length === textActions.length ? "Gerar kit novamente" : "Criar kit de divulgação"}
+        </button>
+      </div>
+      {marketingKitError && <div className="app-inline-error">{marketingKitError}</div>}
+      {marketingKitEntries.length > 0 && <div className="app-ai-marketing-kit-result">
+        <header>
+          <div><strong>Kit de divulgação</strong><span>{marketingKitEntries.length}/{textActions.length} conteúdos prontos · {marketingKitEntries.some(({ result }) => result.source === "cloudflare") ? "Workers AI + fallback automático" : "Templates IMOB"}</span></div>
+          <div className="app-ai-marketing-kit-toolbar">
+            <button type="button" className="app-secondary-button" onClick={() => void copyMarketingKit()}>Copiar kit</button>
+            <button type="button" className="app-secondary-button" onClick={downloadMarketingKit}>Baixar TXT</button>
+            {newestSavedReel ? <a className="app-primary-button" href={`/app/publicacoes/?propertyId=${encodeURIComponent(propertyId)}&mediaAssetId=${encodeURIComponent(newestSavedReel.id)}`}>Criar publicação com Reel</a> : <a className="app-secondary-button" href={`/app/publicacoes/?propertyId=${encodeURIComponent(propertyId)}`}>Abrir publicações</a>}
+          </div>
+        </header>
+        <div className="app-ai-marketing-kit-grid">
+          {marketingKitEntries.map(({ action, result }) => <article key={action.kind}>
+            <div><strong>{action.label}</strong><span>{result.source === "cloudflare" ? "Workers AI" : "Fallback IMOB"}</span></div>
+            <textarea readOnly rows={action.kind === "property_description" ? 7 : 5} value={result.text}/>
+            <button type="button" className="app-secondary-button" onClick={() => void navigator.clipboard?.writeText(result.text)}>Copiar</button>
+          </article>)}
+        </div>
+        <footer>
+          <span>{selectedForReel.length} foto(s) atualmente selecionada(s) para o Reel.</span>
+          <span>{reelAssets.length > 0 ? `${reelAssets.length} Reel(s) salvo(s) disponíveis para publicação.` : "Salve um Reel para adicioná-lo diretamente a uma publicação."}</span>
+        </footer>
+      </div>}
+      <div className="app-ai-text-actions">{textActions.map((action) => <button key={action.kind} type="button" onClick={() => void generateText(action.kind)} disabled={!canUpdate || Boolean(textBusy) || marketingKitBusy || aiRuntimeLoading || Boolean(aiRuntimeError)}><strong>{textBusy === action.kind ? "Gerando..." : action.label}</strong><span>{action.description}</span></button>)}</div>
       {!canUpdate && <div className="app-inline-error">Você precisa de permissão para editar o imóvel antes de gerar conteúdo.</div>}
       {textError && <div className="app-inline-error">{textError}</div>}
       {textResult && <div className="app-ai-text-result"><header><strong>Conteúdo gerado</strong><span>{textResult.source === "cloudflare" ? "Workers AI" : "Fallback IMOB"}</span></header><textarea readOnly rows={8} value={textResult.text}/><div><button type="button" className="app-secondary-button" onClick={() => void navigator.clipboard?.writeText(textResult.text)}>Copiar texto</button>{textResult.source === "template" && <small>O conteúdo foi produzido sem chamada de IA externa.</small>}</div></div>}
