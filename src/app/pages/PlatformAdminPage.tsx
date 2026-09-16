@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AppApiError } from "../../services/appApi";
 import {
   createPlatformAccessKey,
+  getPlatformAiStudioTelemetry,
   getPlatformOverview,
   listPlatformAccessKeys,
   listPlatformAiStudioOrganizations,
@@ -12,6 +13,7 @@ import {
   type PlatformAccessKeyStatus,
   type PlatformAiStudioOrganization,
   type PlatformAiStudioOrganizationUpdate,
+  type PlatformAiStudioTelemetry,
   type PlatformOverview,
 } from "../../services/platformAdminApi";
 
@@ -32,6 +34,26 @@ function formatDate(value: string | null): string {
 
 type AiStudioDraft = { enabled: boolean; planCode: string; monthlyReelLimit: string };
 
+function formatDurationMs(value: number | null): string {
+  if (value === null) return "—";
+  return `${(value / 1000).toFixed(value >= 10_000 ? 1 : 2)} s`;
+}
+
+function formatMegabytes(value: number | null): string {
+  if (value === null) return "—";
+  return `${(value / 1_048_576).toFixed(1)} MB`;
+}
+
+function formatRate(part: number, total: number): string {
+  if (total <= 0) return "0%";
+  return `${Math.round((part / total) * 100)}%`;
+}
+
+const telemetryLabels: Record<string, string> = {
+  chromium: "Chromium", safari: "Safari", firefox: "Firefox", other: "Outro",
+  desktop: "Desktop", mobile: "Mobile", tablet: "Tablet", unknown: "Desconhecido",
+};
+
 function aiStudioDraft(item: PlatformAiStudioOrganization): AiStudioDraft {
   return { enabled: item.enabled, planCode: item.planCode, monthlyReelLimit: item.monthlyReelLimit === null ? "" : String(item.monthlyReelLimit) };
 }
@@ -41,6 +63,9 @@ export function PlatformAdminPage() {
   const [keys, setKeys] = useState<PlatformAccessKey[]>([]);
   const [aiOrganizations, setAiOrganizations] = useState<PlatformAiStudioOrganization[]>([]);
   const [aiDrafts, setAiDrafts] = useState<Record<string, AiStudioDraft>>({});
+  const [telemetry, setTelemetry] = useState<PlatformAiStudioTelemetry | null>(null);
+  const [telemetryDays, setTelemetryDays] = useState(30);
+  const [telemetryLoading, setTelemetryLoading] = useState(false);
   const [aiSavingId, setAiSavingId] = useState<string | null>(null);
   const [filters, setFilters] = useState<PlatformAccessKeyFilters>({ status: "all" });
   const [cpf, setCpf] = useState("");
@@ -63,6 +88,12 @@ export function PlatformAdminPage() {
       setKeys(accessKeys);
       setAiOrganizations(aiStudioOrganizations);
       setAiDrafts(Object.fromEntries(aiStudioOrganizations.map((item) => [item.organizationId, aiStudioDraft(item)])));
+      try {
+        setTelemetry(await getPlatformAiStudioTelemetry(telemetryDays));
+      } catch (telemetryError) {
+        console.warn("[Admin Escala IMOB] Telemetria do Estúdio IA indisponível", telemetryError);
+        setTelemetry(null);
+      }
     } catch (error) {
       setMessage({
         tone: "error",
@@ -71,7 +102,7 @@ export function PlatformAdminPage() {
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [filters, telemetryDays]);
 
   useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -110,6 +141,20 @@ export function PlatformAdminPage() {
       setMessage({ tone: "error", text: error instanceof AppApiError ? error.message : "Não foi possível revogar a chave." });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleTelemetryDays(nextDays: number) {
+    if (telemetryLoading || nextDays === telemetryDays) return;
+    setTelemetryDays(nextDays);
+    setTelemetryLoading(true);
+    setMessage(null);
+    try {
+      setTelemetry(await getPlatformAiStudioTelemetry(nextDays));
+    } catch (error) {
+      setMessage({ tone: "error", text: error instanceof AppApiError ? error.message : "Não foi possível carregar a telemetria do Estúdio IA." });
+    } finally {
+      setTelemetryLoading(false);
     }
   }
 
@@ -179,6 +224,28 @@ export function PlatformAdminPage() {
             </tbody>
           </table>
         </div>
+      </article>
+
+      <article className="platform-admin-card platform-admin-telemetry">
+        <header>
+          <div><h2>Telemetria do Reel Lite</h2><p>Desempenho real da geração local para decidir compatibilidade, limites e próximos investimentos do MVP.</p></div>
+          <label className="platform-admin-telemetry-range"><span>Janela</span><select value={telemetryDays} disabled={telemetryLoading} onChange={(event) => void handleTelemetryDays(Number(event.target.value))}><option value={7}>7 dias</option><option value={30}>30 dias</option><option value={60}>60 dias</option><option value={90}>90 dias</option></select></label>
+        </header>
+        {telemetryLoading ? <div className="platform-admin-empty">Atualizando telemetria...</div> : telemetry ? <>
+          <div className="platform-admin-telemetry-metrics">
+            <article><span>Gerações</span><strong>{telemetry.totalGenerations}</strong></article>
+            <article><span>Taxa de sucesso</span><strong>{formatRate(telemetry.succeeded, telemetry.totalGenerations)}</strong></article>
+            <article><span>Render p50</span><strong>{formatDurationMs(telemetry.renderMsP50)}</strong></article>
+            <article><span>Render p90</span><strong>{formatDurationMs(telemetry.renderMsP90)}</strong></article>
+            <article><span>Regerações</span><strong>{formatRate(telemetry.regenerationCount, telemetry.totalGenerations)}</strong></article>
+            <article><span>Saída média</span><strong>{formatMegabytes(telemetry.outputBytesAverage)}</strong></article>
+          </div>
+          <div className="platform-admin-telemetry-details">
+            <section><header><strong>Navegadores</strong><span>{telemetry.webGpuCount} com WebGPU · média {telemetry.imageCountAverage?.toFixed(1) ?? "—"} fotos</span></header><div className="platform-admin-telemetry-list">{telemetry.browsers.length ? telemetry.browsers.map((item) => <div key={item.key}><span>{telemetryLabels[item.key] ?? item.key}</span><strong>{item.total} · {formatRate(item.succeeded, item.total)} sucesso</strong><small>p90 {formatDurationMs(item.renderMsP90)}</small></div>) : <p>Sem dados nesta janela.</p>}</div></section>
+            <section><header><strong>Dispositivos</strong><span>Preparação média {formatDurationMs(telemetry.preparationMsAverage)}</span></header><div className="platform-admin-telemetry-list">{telemetry.devices.length ? telemetry.devices.map((item) => <div key={item.key}><span>{telemetryLabels[item.key] ?? item.key}</span><strong>{item.total} · {formatRate(item.succeeded, item.total)} sucesso</strong><small>p90 {formatDurationMs(item.renderMsP90)}</small></div>) : <p>Sem dados nesta janela.</p>}</div></section>
+            <section><header><strong>Falhas técnicas</strong><span>{telemetry.failed} falha(s) no período</span></header><div className="platform-admin-telemetry-list">{telemetry.errors.length ? telemetry.errors.map((item) => <div key={item.code}><span>{item.code}</span><strong>{item.total}</strong><small>{formatRate(item.total, telemetry.failed)} das falhas</small></div>) : <p>Nenhuma falha registrada.</p>}</div></section>
+          </div>
+        </> : <div className="platform-admin-empty">Sem telemetria disponível.</div>}
       </article>
 
       <article className="platform-admin-card">

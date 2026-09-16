@@ -112,6 +112,45 @@ export async function revokePlatformAccessKey(id: string): Promise<PlatformAcces
   return platformRequest(`/platform/access-keys/${encodeURIComponent(id)}/revoke`, { method: "POST" });
 }
 
+
+export interface PlatformAiStudioTelemetryBreakdown {
+  key: string;
+  total: number;
+  succeeded: number;
+  failed: number;
+  renderMsP90: number | null;
+}
+
+export interface PlatformAiStudioTelemetryError {
+  code: string;
+  total: number;
+}
+
+export interface PlatformAiStudioTelemetry {
+  from: string;
+  to: string;
+  days: number;
+  totalGenerations: number;
+  succeeded: number;
+  failed: number;
+  regenerationCount: number;
+  webGpuCount: number;
+  renderMsP50: number | null;
+  renderMsP90: number | null;
+  renderMsAverage: number | null;
+  preparationMsAverage: number | null;
+  outputBytesAverage: number | null;
+  imageCountAverage: number | null;
+  browsers: PlatformAiStudioTelemetryBreakdown[];
+  devices: PlatformAiStudioTelemetryBreakdown[];
+  errors: PlatformAiStudioTelemetryError[];
+}
+
+export async function getPlatformAiStudioTelemetry(days = 30): Promise<PlatformAiStudioTelemetry> {
+  const safeDays = [7, 30, 60, 90].includes(days) ? days : 30;
+  return platformRequest(`/platform/ai-studio/telemetry?days=${safeDays}`);
+}
+
 export interface PlatformAiStudioOrganization {
   organizationId: string;
   organizationName: string;
