@@ -3,6 +3,7 @@ import { AppApiError } from "../../services/appApi";
 import {
   confirmAiStudioReelAsset,
   createAiStudioReelAssetUpload,
+  deleteAiStudioReelAsset,
   generatePropertyMarketingText,
   getAiStudioRuntime,
   listAiStudioReelAssets,
@@ -386,6 +387,7 @@ export function PropertyAiStudioPanel({
   const [reelAssets, setReelAssets] = useState<AiStudioReelAsset[]>([]);
   const [reelAssetsLoading, setReelAssetsLoading] = useState(Boolean(propertyId && canUpdate));
   const [reelAssetSaving, setReelAssetSaving] = useState(false);
+  const [reelAssetDeletingId, setReelAssetDeletingId] = useState<string | null>(null);
   const [reelAssetError, setReelAssetError] = useState<string | null>(null);
   const [reelFeedbackSentiment, setReelFeedbackSentiment] = useState<AiStudioReelFeedbackSentiment | null>(null);
   const [reelFeedbackReasons, setReelFeedbackReasons] = useState<AiStudioReelFeedbackReason[]>([]);
@@ -888,6 +890,20 @@ export function PropertyAiStudioPanel({
     }
   }
 
+  async function deleteSavedReel(asset: AiStudioReelAsset) {
+    if (!propertyId || reelAssetDeletingId || !globalThis.confirm(`Excluir o Reel “${asset.originalName}” do Estúdio? O arquivo salvo será removido do armazenamento privado.`)) return;
+    setReelAssetDeletingId(asset.id);
+    setReelAssetError(null);
+    try {
+      await deleteAiStudioReelAsset(organizationId, propertyId, asset.id);
+      setReelAssets((current) => current.filter((item) => item.id !== asset.id));
+    } catch (error) {
+      setReelAssetError(error instanceof AppApiError ? error.message : "Não foi possível excluir o Reel salvo.");
+    } finally {
+      setReelAssetDeletingId(null);
+    }
+  }
+
   async function generateText(kind: AiStudioTextKind) {
     if (!propertyId || textBusy || !canUpdate || aiRuntimeLoading || aiRuntimeError) return;
     setTextBusy(kind);
@@ -1102,7 +1118,7 @@ export function PropertyAiStudioPanel({
       {reelAssetError && <div className="app-inline-error">{reelAssetError}</div>}
       <div className="app-ai-reel-library">
         <div className="app-section-title-row"><div><strong>Reels salvos</strong><p className="app-form-help">Os vídeos confirmados ficam no armazenamento privado da organização. Use “Criar publicação” para levar um Reel diretamente ao planejamento de divulgação.</p></div>{reelAssets.length > 0 && <span className="app-ai-runtime-badge">{reelAssets.length} salvo(s)</span>}</div>
-        {reelAssetsLoading ? <div className="app-table-empty"><span className="app-spinner"/>Carregando Reels salvos...</div> : reelAssets.length === 0 ? <div className="app-soft-empty">Nenhum Reel foi salvo neste imóvel ainda.</div> : <div className="app-ai-reel-library-grid">{reelAssets.slice(0, 6).map((asset) => <article key={asset.id}><video controls playsInline preload="metadata" src={asset.viewUrl}/><div><strong>{asset.originalName}</strong><span>{asset.durationSeconds.toFixed(1)} s · {asset.width} × {asset.height} · {asset.audioIncluded ? "com trilha" : "sem trilha"}</span><div className="app-ai-reel-library-actions"><a className="app-secondary-button" href={asset.downloadUrl}>Baixar</a><a className="app-primary-button" href={`/app/publicacoes/?propertyId=${encodeURIComponent(propertyId!)}&mediaAssetId=${encodeURIComponent(asset.id)}`}>Criar publicação</a></div></div></article>)}</div>}
+        {reelAssetsLoading ? <div className="app-table-empty"><span className="app-spinner"/>Carregando Reels salvos...</div> : reelAssets.length === 0 ? <div className="app-soft-empty">Nenhum Reel foi salvo neste imóvel ainda.</div> : <div className="app-ai-reel-library-grid">{reelAssets.slice(0, 6).map((asset) => <article key={asset.id}><video controls playsInline preload="metadata" src={asset.viewUrl}/><div><strong>{asset.originalName}</strong><span>{asset.durationSeconds.toFixed(1)} s · {asset.width} × {asset.height} · {asset.audioIncluded ? "com trilha" : "sem trilha"}</span><div className="app-ai-reel-library-actions"><a className="app-secondary-button" href={asset.downloadUrl}>Baixar</a><a className="app-primary-button" href={`/app/publicacoes/?propertyId=${encodeURIComponent(propertyId!)}&mediaAssetId=${encodeURIComponent(asset.id)}`}>Criar publicação</a><button type="button" className="app-secondary-button is-danger" disabled={reelAssetDeletingId === asset.id} onClick={() => void deleteSavedReel(asset)}>{reelAssetDeletingId === asset.id ? "Excluindo..." : "Excluir"}</button></div></div></article>)}</div>}
       </div>
       <p className="app-ai-privacy-note">A exportação continua 100% local: imagens, profundidade, template, animações, CTA e trilha opcional são compostos no navegador, sem Kling, Veo ou Pedra.</p>
     </section>

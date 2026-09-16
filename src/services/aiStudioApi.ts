@@ -251,3 +251,14 @@ export async function confirmAiStudioReelAsset(
     body: JSON.stringify(metadata),
   });
 }
+
+
+export async function deleteAiStudioReelAsset(
+  organizationId: string,
+  propertyId: string,
+  assetId: string,
+): Promise<{ deleted: true; assetId: string }> {
+  return aiStudioRequest(organizationId, `/portfolio/properties/${encodeURIComponent(propertyId)}/ai/reel-assets/${encodeURIComponent(assetId)}`, {
+    method: "DELETE",
+  });
+}
