@@ -34,6 +34,25 @@ function formatDate(value: string | null): string {
 
 type AiStudioDraft = { enabled: boolean; planCode: string; monthlyReelLimit: string };
 
+type AiStudioCommercialPreset = {
+  code: "trial" | "essencial" | "profissional" | "imobiliaria" | "enterprise";
+  label: string;
+  monthlyReelLimit: number | null;
+  customLimit: boolean;
+};
+
+const aiStudioCommercialPresets: AiStudioCommercialPreset[] = [
+  { code: "trial", label: "Trial · 1 Reel/mês", monthlyReelLimit: 1, customLimit: false },
+  { code: "essencial", label: "Essencial · 3 Reels/mês", monthlyReelLimit: 3, customLimit: false },
+  { code: "profissional", label: "Profissional · 10 Reels/mês", monthlyReelLimit: 10, customLimit: false },
+  { code: "imobiliaria", label: "Imobiliária · 30 Reels/mês", monthlyReelLimit: 30, customLimit: false },
+  { code: "enterprise", label: "Enterprise · franquia customizada", monthlyReelLimit: null, customLimit: true },
+];
+
+function aiStudioCommercialPreset(planCode: string): AiStudioCommercialPreset | undefined {
+  return aiStudioCommercialPresets.find((preset) => preset.code === planCode);
+}
+
 function formatDurationMs(value: number | null): string {
   if (value === null) return "—";
   return `${(value / 1000).toFixed(value >= 10_000 ? 1 : 2)} s`;
@@ -165,7 +184,8 @@ export function PlatformAdminPage() {
     const draft = aiDrafts[item.organizationId];
     if (!draft) return;
     const planCode = draft.planCode.trim().toLowerCase();
-    const monthlyLimit = draft.monthlyReelLimit.trim() === "" ? null : Number(draft.monthlyReelLimit);
+    const preset = aiStudioCommercialPreset(planCode);
+    const monthlyLimit = preset && !preset.customLimit ? preset.monthlyReelLimit : draft.monthlyReelLimit.trim() === "" ? null : Number(draft.monthlyReelLimit);
     if (!planCode) { setMessage({ tone: "error", text: "Informe o código do plano do Estúdio IA." }); return; }
     if (monthlyLimit !== null && (!Number.isInteger(monthlyLimit) || monthlyLimit < 0)) { setMessage({ tone: "error", text: "O limite mensal de Reels deve ser um inteiro maior ou igual a zero." }); return; }
     const input: PlatformAiStudioOrganizationUpdate = { enabled: draft.enabled, planCode, monthlyReelLimit: monthlyLimit };
@@ -204,20 +224,31 @@ export function PlatformAdminPage() {
       </div>
 
       <article className="platform-admin-card">
-        <header><div><h2>Estúdio IA por organização</h2><p>Habilite o recurso, defina o plano comercial e limite mensal de Reels. Deixe o limite vazio para uso ilimitado.</p></div></header>
+        <header><div><h2>Estúdio IA por organização</h2><p>Política do Reel Lite: Trial 1, Essencial 3, Profissional 10, Imobiliária 30 e Enterprise com franquia customizada.</p></div></header>
         <div className="platform-admin-table-wrap">
           <table className="platform-admin-table platform-admin-ai-table">
-            <thead><tr><th>Organização</th><th>Ativo</th><th>Plano</th><th>Uso no mês</th><th>Limite mensal</th><th /></tr></thead>
+            <thead><tr><th>Organização</th><th>Ativo</th><th>Plano comercial</th><th>Uso no mês</th><th>Franquia mensal</th><th /></tr></thead>
             <tbody>
               {aiOrganizations.map((item) => {
                 const draft = aiDrafts[item.organizationId] ?? aiStudioDraft(item);
-                const dirty = draft.enabled !== item.enabled || draft.planCode.trim().toLowerCase() !== item.planCode || (draft.monthlyReelLimit.trim() === "" ? null : Number(draft.monthlyReelLimit)) !== item.monthlyReelLimit;
+                const preset = aiStudioCommercialPreset(draft.planCode.trim().toLowerCase());
+                const effectiveMonthlyLimit = preset && !preset.customLimit ? preset.monthlyReelLimit : draft.monthlyReelLimit.trim() === "" ? null : Number(draft.monthlyReelLimit);
+                const dirty = draft.enabled !== item.enabled || draft.planCode.trim().toLowerCase() !== item.planCode || effectiveMonthlyLimit !== item.monthlyReelLimit;
                 return <tr key={item.organizationId}>
                   <td><strong>{item.organizationName}</strong><small>{item.organizationId.slice(0, 8)}</small></td>
                   <td><input type="checkbox" aria-label={`Estúdio IA ativo para ${item.organizationName}`} checked={draft.enabled} disabled={Boolean(aiSavingId)} onChange={(event) => setAiDrafts((current) => ({ ...current, [item.organizationId]: { ...draft, enabled: event.target.checked } }))}/></td>
-                  <td><input aria-label={`Plano de ${item.organizationName}`} value={draft.planCode} maxLength={32} disabled={Boolean(aiSavingId)} onChange={(event) => setAiDrafts((current) => ({ ...current, [item.organizationId]: { ...draft, planCode: event.target.value.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32) } }))}/></td>
+                  <td>
+                    <select aria-label={`Plano de ${item.organizationName}`} value={preset?.code ?? "__legacy__"} disabled={Boolean(aiSavingId)} onChange={(event) => {
+                      const next = aiStudioCommercialPreset(event.target.value);
+                      if (!next) return;
+                      setAiDrafts((current) => ({ ...current, [item.organizationId]: { ...draft, planCode: next.code, monthlyReelLimit: next.customLimit ? "" : String(next.monthlyReelLimit) } }));
+                    }}>
+                      {!preset && <option value="__legacy__">Atual: {draft.planCode} · legado</option>}
+                      {aiStudioCommercialPresets.map((option) => <option key={option.code} value={option.code}>{option.label}</option>)}
+                    </select>
+                  </td>
                   <td><strong>{item.currentMonthUsage}</strong></td>
-                  <td><input aria-label={`Limite mensal de ${item.organizationName}`} value={draft.monthlyReelLimit} inputMode="numeric" placeholder="Ilimitado" disabled={Boolean(aiSavingId)} onChange={(event) => setAiDrafts((current) => ({ ...current, [item.organizationId]: { ...draft, monthlyReelLimit: event.target.value.replace(/\D/g, "").slice(0, 6) } }))}/></td>
+                  <td><input aria-label={`Limite mensal de ${item.organizationName}`} value={preset && !preset.customLimit ? String(preset.monthlyReelLimit) : draft.monthlyReelLimit} inputMode="numeric" placeholder="Ilimitado" disabled={Boolean(aiSavingId) || Boolean(preset && !preset.customLimit)} onChange={(event) => setAiDrafts((current) => ({ ...current, [item.organizationId]: { ...draft, monthlyReelLimit: event.target.value.replace(/\D/g, "").slice(0, 6) } }))}/></td>
                   <td><button type="button" disabled={!dirty || Boolean(aiSavingId)} onClick={() => void handleSaveAiStudio(item)}>{aiSavingId === item.organizationId ? "Salvando..." : "Salvar"}</button></td>
                 </tr>;
               })}
