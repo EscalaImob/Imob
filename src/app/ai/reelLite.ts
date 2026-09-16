@@ -3,8 +3,9 @@ import type { PropertyDepthMap } from "./browserVision";
 const WIDTH = 720;
 const HEIGHT = 1280;
 const FPS = 30;
-const SECONDS_PER_IMAGE = 2.35;
-const CTA_SECONDS = 1.9;
+const MIN_REEL_SECONDS = 30;
+const MAX_REEL_SECONDS = 42;
+const CTA_SECONDS = 3;
 const MAX_IMAGES = 8;
 const VIDEO_BITRATE = 5_000_000;
 const AUDIO_BITRATE = 128_000;
@@ -83,6 +84,7 @@ export interface ReelLiteResult {
   imageCount: number;
   audioIncluded: boolean;
   template: ReelLiteTemplate;
+  renderMs: number;
 }
 
 export interface ReelLiteSupport {
@@ -206,7 +208,17 @@ export function reelLiteSupport(): ReelLiteSupport {
 
 export function reelLiteEstimatedDuration(imageCount: number): number {
   const count = Math.max(0, Math.min(MAX_IMAGES, imageCount));
-  return count > 0 ? count * SECONDS_PER_IMAGE + CTA_SECONDS : 0;
+  if (count === 0) return 0;
+  return clamp(28 + count * 1.75, MIN_REEL_SECONDS, MAX_REEL_SECONDS);
+}
+
+function sceneDurationSeconds(imageCount: number): number {
+  const count = Math.max(1, Math.min(MAX_IMAGES, imageCount));
+  return Math.max(2.5, (reelLiteEstimatedDuration(count) - CTA_SECONDS) / count);
+}
+
+async function releaseEncoderTurn(): Promise<void> {
+  await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 250));
 }
 
 async function loadBitmap(imageUrl: string): Promise<ImageBitmap> {
@@ -869,7 +881,8 @@ export async function createReelLiteMp4(
     recorderError = candidate.error ?? new Error("REEL_RECORDER_ERROR");
   });
 
-  const scenesDuration = prepared.length * SECONDS_PER_IMAGE;
+  const secondsPerImage = sceneDurationSeconds(prepared.length);
+  const scenesDuration = prepared.length * secondsPerImage;
   const durationSeconds = scenesDuration + CTA_SECONDS;
   const stopped = new Promise<void>((resolve) => recorder.addEventListener("stop", () => resolve(), { once: true }));
   let lastReported = -1;
@@ -881,30 +894,32 @@ export async function createReelLiteMp4(
     const startedAt = performance.now();
 
     await new Promise<void>((resolve, reject) => {
-      let frameId = 0;
+      let frameTimer = 0;
       let settled = false;
+      const frameIntervalMs = 1000 / FPS;
       const timeoutId = globalThis.setTimeout(() => {
         if (settled) return;
         settled = true;
-        if (frameId) cancelAnimationFrame(frameId);
+        if (frameTimer) globalThis.clearTimeout(frameTimer);
         reject(new Error("REEL_RENDER_TIMEOUT"));
-      }, Math.ceil((durationSeconds + 10) * 1000));
+      }, Math.ceil((durationSeconds + 15) * 1000));
 
       const finish = () => {
         if (settled) return;
         settled = true;
+        if (frameTimer) globalThis.clearTimeout(frameTimer);
         globalThis.clearTimeout(timeoutId);
         resolve();
       };
 
-      const render = (now: number) => {
+      const render = () => {
         if (settled) return;
-        const elapsed = Math.min(durationSeconds, (now - startedAt) / 1000);
+        const elapsed = Math.min(durationSeconds, (performance.now() - startedAt) / 1000);
 
         if (elapsed < scenesDuration) {
-          const rawIndex = Math.min(prepared.length - 1, Math.floor(elapsed / SECONDS_PER_IMAGE));
-          const sceneStart = rawIndex * SECONDS_PER_IMAGE;
-          const sceneProgress = clamp((elapsed - sceneStart) / SECONDS_PER_IMAGE, 0, 1);
+          const rawIndex = Math.min(prepared.length - 1, Math.floor(elapsed / secondsPerImage));
+          const sceneStart = rawIndex * secondsPerImage;
+          const sceneProgress = clamp((elapsed - sceneStart) / secondsPerImage, 0, 1);
           drawScene(context, prepared[rawIndex]!, sceneProgress, options, branding, rawIndex, prepared.length);
 
           if (rawIndex < prepared.length - 1 && sceneProgress > 1 - TRANSITION_FRACTION) {
@@ -936,15 +951,19 @@ export async function createReelLiteMp4(
           finish();
           return;
         }
-        frameId = requestAnimationFrame(render);
+        frameTimer = globalThis.setTimeout(render, frameIntervalMs);
       };
-      frameId = requestAnimationFrame(render);
+      frameTimer = globalThis.setTimeout(render, 0);
     });
 
     onProgress?.({ phase: "finalizing", progress: 1, message: "Finalizando MP4..." });
+    if (recorder.state === "recording") {
+      try { recorder.requestData(); } catch { /* alguns navegadores não aceitam flush explícito */ }
+    }
     recorder.stop();
-    await withTimeout(stopped, 10_000, "REEL_RECORDER_STOP_TIMEOUT");
+    await withTimeout(stopped, 12_000, "REEL_RECORDER_STOP_TIMEOUT");
     if (recorderError) throw recorderError;
+    const renderMs = Math.max(0, Math.round(performance.now() - startedAt));
     const blob = new Blob(chunks, { type: recorderMimeType });
     if (blob.size === 0) throw new Error("REEL_EMPTY_OUTPUT");
     return {
@@ -957,6 +976,7 @@ export async function createReelLiteMp4(
       imageCount: prepared.length,
       audioIncluded,
       template: options.template,
+      renderMs,
     };
   } finally {
     if (recorder.state !== "inactive") {
@@ -969,5 +989,6 @@ export async function createReelLiteMp4(
     if (soundtrack) {
       await withTimeout(soundtrack.context.close(), 2_000, "REEL_AUDIO_CLOSE_TIMEOUT").catch(() => undefined);
     }
+    await releaseEncoderTurn();
   }
 }

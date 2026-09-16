@@ -76,6 +76,32 @@ export interface AiStudioReelUsageInput {
   imageCount: number;
 }
 
+export type AiStudioReelTelemetryStatus = "succeeded" | "failed";
+export type AiStudioBrowserFamily = "chromium" | "safari" | "firefox" | "other";
+export type AiStudioDeviceClass = "desktop" | "mobile" | "tablet" | "unknown";
+
+export interface AiStudioReelTelemetryInput {
+  generationId: string;
+  status: AiStudioReelTelemetryStatus;
+  imageCount: number;
+  durationSeconds: number | null;
+  renderMs: number;
+  preparationMs: number;
+  analysisMs: number | null;
+  outputBytes: number | null;
+  webGpuAvailable: boolean;
+  renderer: "canvas_media_recorder";
+  audioIncluded: boolean;
+  regeneration: boolean;
+  depthCacheHits: number;
+  depthCalculated: number;
+  browserFamily: AiStudioBrowserFamily;
+  deviceClass: AiStudioDeviceClass;
+  hardwareConcurrency: number | null;
+  deviceMemoryGb: number | null;
+  errorCode: string | null;
+}
+
 function apiBase(): string {
   const value = import.meta.env.VITE_API_URL?.trim();
   if (!value) throw new AppApiError("A plataforma ainda não está conectada à API.", "API_NOT_CONFIGURED");
@@ -129,6 +155,17 @@ export async function recordAiStudioReelUsage(
   input: AiStudioReelUsageInput,
 ): Promise<AiStudioRuntime> {
   return aiStudioRequest(organizationId, `/portfolio/properties/${encodeURIComponent(propertyId)}/ai/reel-usage`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function recordAiStudioReelTelemetry(
+  organizationId: string,
+  propertyId: string,
+  input: AiStudioReelTelemetryInput,
+): Promise<{ recorded: boolean }> {
+  return aiStudioRequest(organizationId, `/portfolio/properties/${encodeURIComponent(propertyId)}/ai/reel-telemetry`, {
     method: "POST",
     body: JSON.stringify(input),
   });

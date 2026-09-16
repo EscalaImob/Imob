@@ -6,10 +6,12 @@ import {
   generatePropertyMarketingText,
   getAiStudioRuntime,
   listAiStudioReelAssets,
+  recordAiStudioReelTelemetry,
   recordAiStudioReelUsage,
   uploadAiStudioReelFile,
   type AiStudioReelAsset,
   type AiStudioReelAssetMetadata,
+  type AiStudioReelTelemetryInput,
   type AiStudioRuntime,
   type AiStudioTextKind,
   type AiStudioTextResult,
@@ -53,6 +55,43 @@ type AnalysisByImage = Record<string, PropertyPhotoClassification>;
 type QualityByImage = Record<string, PropertyPhotoQuality>;
 
 const MAX_REEL_IMAGES = 8;
+
+function reelTelemetryClientProfile(): Pick<AiStudioReelTelemetryInput, "browserFamily" | "deviceClass" | "hardwareConcurrency" | "deviceMemoryGb"> {
+  if (typeof navigator === "undefined") {
+    return { browserFamily: "other", deviceClass: "unknown", hardwareConcurrency: null, deviceMemoryGb: null };
+  }
+  const userAgent = navigator.userAgent.toLocaleLowerCase("en-US");
+  const browserFamily: AiStudioReelTelemetryInput["browserFamily"] = userAgent.includes("firefox/")
+    ? "firefox"
+    : userAgent.includes("safari/") && !userAgent.includes("chrome/") && !userAgent.includes("chromium/") && !userAgent.includes("crios/")
+      ? "safari"
+      : userAgent.includes("chrome/") || userAgent.includes("chromium/") || userAgent.includes("crios/") || userAgent.includes("edg/")
+        ? "chromium"
+        : "other";
+  const coarseNavigator = navigator as Navigator & { deviceMemory?: number; userAgentData?: { mobile?: boolean } };
+  const touchPoints = Number(navigator.maxTouchPoints ?? 0);
+  const smallViewport = typeof globalThis.innerWidth === "number" && globalThis.innerWidth <= 820;
+  const mobileHint = coarseNavigator.userAgentData?.mobile === true || /iphone|android.+mobile/u.test(userAgent);
+  const tabletHint = /ipad|tablet|android/u.test(userAgent) && !mobileHint;
+  const deviceClass: AiStudioReelTelemetryInput["deviceClass"] = mobileHint
+    ? "mobile"
+    : tabletHint || (touchPoints > 1 && smallViewport)
+      ? "tablet"
+      : "desktop";
+  const hardwareConcurrency = Number.isInteger(navigator.hardwareConcurrency) && navigator.hardwareConcurrency > 0
+    ? Math.min(256, navigator.hardwareConcurrency)
+    : null;
+  const deviceMemory = coarseNavigator.deviceMemory;
+  const deviceMemoryGb = typeof deviceMemory === "number" && Number.isFinite(deviceMemory) && deviceMemory > 0
+    ? Math.min(256, deviceMemory)
+    : null;
+  return { browserFamily, deviceClass, hardwareConcurrency, deviceMemoryGb };
+}
+
+function reelTelemetryErrorCode(error: unknown): string {
+  const raw = error instanceof Error ? error.message.trim().toUpperCase() : "REEL_FAILED";
+  return /^[A-Z0-9_]{1,80}$/u.test(raw) ? raw : "REEL_FAILED";
+}
 
 function recommendReelImageIds(
   images: PropertyImageItem[],
@@ -275,6 +314,7 @@ export function PropertyAiStudioPanel({
   const [selectedForReelIds, setSelectedForReelIds] = useState<string[]>([]);
   const [reelSelectionReady, setReelSelectionReady] = useState(false);
   const [visionError, setVisionError] = useState<string | null>(null);
+  const [lastAnalysisMs, setLastAnalysisMs] = useState<number | null>(null);
   const [depthImageId, setDepthImageId] = useState<string | null>(null);
   const [depth, setDepth] = useState<PropertyDepthMap | null>(null);
   const [textBusy, setTextBusy] = useState<AiStudioTextKind | null>(null);
@@ -303,6 +343,7 @@ export function PropertyAiStudioPanel({
   const [reelAssetError, setReelAssetError] = useState<string | null>(null);
   const runtimeDefaultsAppliedRef = useRef<string | null>(null);
   const reelDepthCacheRef = useRef<Map<string, PropertyDepthMap>>(new Map());
+  const reelGenerationAttemptsRef = useRef(0);
   const support = useMemo(() => browserVisionSupport(), []);
   const reelSupport = useMemo(() => reelLiteSupport(), []);
 
@@ -357,7 +398,9 @@ export function PropertyAiStudioPanel({
     setSelectedForReelIds([]);
     setReelSelectionReady(false);
     setVisionError(null);
+    setLastAnalysisMs(null);
     setReelAssetError(null);
+    reelGenerationAttemptsRef.current = 0;
   }, [organizationId, propertyId]);
 
   useEffect(() => {
@@ -407,6 +450,7 @@ export function PropertyAiStudioPanel({
 
   async function analyzePhotos() {
     if (!support.supported || visionBusy || images.length === 0 || !propertyId || aiRuntimeError) return;
+    const analysisStartedAt = performance.now();
     setVisionBusy(true);
     setVisionError(null);
     setVisionProgress(null);
@@ -459,6 +503,7 @@ export function PropertyAiStudioPanel({
       console.warn("[Estúdio IMOB] Falha ao preparar a análise local", error);
       setVisionError("Não foi possível preparar a análise local. Tente novamente; não é necessário remover ou reenviar a imagem.");
     } finally {
+      setLastAnalysisMs(Math.max(0, Math.round(performance.now() - analysisStartedAt)));
       setVisionBusy(false);
       setVisionProgress(null);
     }
@@ -512,6 +557,19 @@ export function PropertyAiStudioPanel({
       setReelError("O limite mensal de Reels desta organização foi atingido.");
       return;
     }
+
+    const generationId = globalThis.crypto.randomUUID();
+    const generationStartedAt = performance.now();
+    const regeneration = reelGenerationAttemptsRef.current > 0;
+    reelGenerationAttemptsRef.current += 1;
+    const clientProfile = reelTelemetryClientProfile();
+    const requestedAudio = reelSoundtrack && reelSupport.audioSupported;
+    let telemetryImageCount = Math.min(MAX_REEL_IMAGES, reelSelectionReady ? selectedForReelIds.length : images.length);
+    let preparationMs = 0;
+    let renderMs = 0;
+    let depthCacheHits = 0;
+    let depthCalculated = 0;
+
     setReelBusy(true);
     setReelError(null);
     setReelUsageWarning(null);
@@ -527,8 +585,10 @@ export function PropertyAiStudioPanel({
         ? freshImages.filter((image) => selectedSet.has(image.id))
         : freshImages
       ).slice(0, MAX_REEL_IMAGES);
+      telemetryImageCount = selected.length;
       if (selected.length === 0) throw new Error("NO_REEL_IMAGES_SELECTED");
       const sources: ReelLiteSource[] = [];
+      const preparationStartedAt = performance.now();
 
       for (let index = 0; index < selected.length; index += 1) {
         const image = selected[index]!;
@@ -538,10 +598,13 @@ export function PropertyAiStudioPanel({
           message: `Calculando profundidade · foto ${index + 1} de ${selected.length}...`,
         });
         let imageDepth: PropertyDepthMap | null = reelDepthCacheRef.current.get(image.id) ?? null;
-        if (!imageDepth) {
+        if (imageDepth) {
+          depthCacheHits += 1;
+        } else {
           try {
             imageDepth = await estimateDepthWithRetry(image.viewUrl);
             reelDepthCacheRef.current.set(image.id, imageDepth);
+            depthCalculated += 1;
           } catch (error) {
             console.warn("[Estúdio IMOB] Profundidade indisponível no Reel Lite; usando movimento simples.", {
               imageId: image.id,
@@ -557,14 +620,14 @@ export function PropertyAiStudioPanel({
           depth: imageDepth,
         });
       }
+      preparationMs = Math.max(0, Math.round(performance.now() - preparationStartedAt));
 
-      const generationId = globalThis.crypto.randomUUID();
       const result = await createReelLiteMp4(
         sources,
         {
           title: propertyTitle,
           template: reelTemplate,
-          soundtrack: reelSoundtrack && reelSupport.audioSupported,
+          soundtrack: requestedAudio,
           facts: reelFacts,
           branding: {
             brandName: organizationName,
@@ -581,9 +644,32 @@ export function PropertyAiStudioPanel({
         },
         setReelProgress,
       );
+      renderMs = result.renderMs;
       const url = URL.createObjectURL(result.blob);
       setReelResult({ ...result, url, generationId, imageIds: selected.map((image) => image.id), usageRecorded: false });
       setReelProgress(null);
+
+      void recordAiStudioReelTelemetry(organizationId, propertyId, {
+        generationId,
+        status: "succeeded",
+        imageCount: result.imageCount,
+        durationSeconds: result.durationSeconds,
+        renderMs: result.renderMs,
+        preparationMs,
+        analysisMs: lastAnalysisMs,
+        outputBytes: result.blob.size,
+        webGpuAvailable: support.webGpu,
+        renderer: "canvas_media_recorder",
+        audioIncluded: result.audioIncluded,
+        regeneration,
+        depthCacheHits,
+        depthCalculated,
+        ...clientProfile,
+        errorCode: null,
+      }).catch((telemetryError) => {
+        console.warn("[Estúdio IMOB] Telemetria técnica do Reel não pôde ser registrada", telemetryError);
+      });
+
       try {
         const updatedRuntime = await recordAiStudioReelUsage(organizationId, propertyId, {
           generationId,
@@ -604,13 +690,39 @@ export function PropertyAiStudioPanel({
       }
     } catch (error) {
       console.warn("[Estúdio IMOB] Falha ao exportar Reel Lite", error);
-      const code = error instanceof Error ? error.message : "REEL_FAILED";
+      const code = reelTelemetryErrorCode(error);
+      const totalElapsedMs = Math.max(0, Math.round(performance.now() - generationStartedAt));
+      if (renderMs === 0 && preparationMs > 0) renderMs = Math.max(0, totalElapsedMs - preparationMs);
+      if (telemetryImageCount > 0) {
+        void recordAiStudioReelTelemetry(organizationId, propertyId, {
+          generationId,
+          status: "failed",
+          imageCount: telemetryImageCount,
+          durationSeconds: null,
+          renderMs,
+          preparationMs,
+          analysisMs: lastAnalysisMs,
+          outputBytes: null,
+          webGpuAvailable: support.webGpu,
+          renderer: "canvas_media_recorder",
+          audioIncluded: requestedAudio,
+          regeneration,
+          depthCacheHits,
+          depthCalculated,
+          ...clientProfile,
+          errorCode: code,
+        }).catch((telemetryError) => {
+          console.warn("[Estúdio IMOB] Telemetria de falha do Reel não pôde ser registrada", telemetryError);
+        });
+      }
       setReelError(
         code === "REEL_MP4_UNSUPPORTED"
           ? "Este navegador não oferece exportação MP4 local. Use Chrome, Edge ou Safari atualizado."
           : code === "NO_REEL_IMAGES_SELECTED"
             ? "Selecione ao menos uma foto para gerar o Reel Lite."
-            : "Não foi possível gerar o Reel Lite. As fotos continuam intactas; tente novamente.",
+            : code === "REEL_RENDER_TIMEOUT" || code === "REEL_RECORDER_STOP_TIMEOUT"
+              ? "A geração local demorou além do limite e foi encerrada com segurança. Tente novamente; não é necessário recarregar a página."
+              : "Não foi possível gerar o Reel Lite. As fotos continuam intactas; tente novamente.",
       );
       setReelProgress(null);
     } finally {
@@ -827,7 +939,7 @@ export function PropertyAiStudioPanel({
       <div className="app-ai-reel-controls">
         <div>
           <strong>{selectedForReel.length} foto(s) selecionada(s) + CTA final</strong>
-          <span>Ordem da galeria · aproximadamente {reelLiteEstimatedDuration(selectedForReel.length).toFixed(1)} s · sem custo de API visual</span>
+          <span>Ordem da galeria · vídeo de aproximadamente {reelLiteEstimatedDuration(selectedForReel.length).toFixed(1)} s · a composição local leva cerca desse tempo · sem custo de API visual</span>
         </div>
         <button type="button" className="app-primary-button" onClick={() => void generateReelLite()} disabled={reelBusy || images.length === 0 || selectedForReel.length === 0 || !reelSupport.supported || aiRuntimeLoading || Boolean(aiRuntimeError) || aiRuntime?.quota.remaining === 0}>
           {reelBusy ? "Gerando MP4..." : reelResult ? "Gerar novamente" : "Gerar Reel Lite MP4"}
@@ -836,7 +948,7 @@ export function PropertyAiStudioPanel({
       {reelResult && <div className="app-ai-reel-result">
         <video controls playsInline src={reelResult.url} aria-label="Prévia do Reel Lite gerado"/>
         <div>
-          <div><strong>Reel Lite pronto</strong><span>{reelResult.imageCount} foto(s) · {reelResult.durationSeconds.toFixed(1)} s · 9:16 · {reelResult.audioIncluded ? "com trilha" : "sem trilha"}</span></div>
+          <div><strong>Reel Lite pronto</strong><span>{reelResult.imageCount} foto(s) · {reelResult.durationSeconds.toFixed(1)} s · 9:16 · {reelResult.audioIncluded ? "com trilha" : "sem trilha"} · render local {(reelResult.renderMs / 1000).toFixed(1)} s</span></div>
           <div className="app-ai-reel-result-actions">
             <a className="app-secondary-button" href={reelResult.url} download={reelResult.filename}>Baixar MP4</a>
             <button type="button" className="app-primary-button" onClick={() => void saveGeneratedReel()} disabled={reelAssetSaving || Boolean(savedCurrentReel) || !reelResult.usageRecorded}>{savedCurrentReel ? "Salvo no Estúdio" : reelAssetSaving ? "Salvando..." : !reelResult.usageRecorded ? "Registro pendente" : "Salvar no Estúdio"}</button>
