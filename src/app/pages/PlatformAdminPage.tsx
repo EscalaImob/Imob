@@ -52,6 +52,8 @@ function formatRate(part: number, total: number): string {
 const telemetryLabels: Record<string, string> = {
   chromium: "Chromium", safari: "Safari", firefox: "Firefox", other: "Outro",
   desktop: "Desktop", mobile: "Mobile", tablet: "Tablet", unknown: "Desconhecido",
+  movement: "Movimento / animação", photo_selection: "Seleção ou ordem das fotos", visual_quality: "Qualidade visual",
+  text_branding: "Textos ou marca", performance: "Demorou demais",
 };
 
 function aiStudioDraft(item: PlatformAiStudioOrganization): AiStudioDraft {
@@ -239,11 +241,14 @@ export function PlatformAdminPage() {
             <article><span>Render p90</span><strong>{formatDurationMs(telemetry.renderMsP90)}</strong></article>
             <article><span>Regerações</span><strong>{formatRate(telemetry.regenerationCount, telemetry.totalGenerations)}</strong></article>
             <article><span>Saída média</span><strong>{formatMegabytes(telemetry.outputBytesAverage)}</strong></article>
+            <article><span>Avaliações</span><strong>{telemetry.feedbackCount}</strong><small>{formatRate(telemetry.feedbackCount, telemetry.succeeded)} das gerações concluídas</small></article>
+            <article><span>Aprovação</span><strong>{formatRate(telemetry.likedCount, telemetry.feedbackCount)}</strong><small>{telemetry.likedCount} gostei · {telemetry.dislikedCount} não gostei</small></article>
           </div>
           <div className="platform-admin-telemetry-details">
             <section><header><strong>Navegadores</strong><span>{telemetry.webGpuCount} com WebGPU disponível · {telemetry.webGpuUsedCount} usaram WebGPU · {telemetry.wasmUsedCount} usaram WASM · média {telemetry.imageCountAverage?.toFixed(1) ?? "—"} fotos</span></header><div className="platform-admin-telemetry-list">{telemetry.browsers.length ? telemetry.browsers.map((item) => <div key={item.key}><span>{telemetryLabels[item.key] ?? item.key}</span><strong>{item.total} · {formatRate(item.succeeded, item.total)} sucesso</strong><small>p90 {formatDurationMs(item.renderMsP90)}</small></div>) : <p>Sem dados nesta janela.</p>}</div></section>
             <section><header><strong>Dispositivos</strong><span>Preparação média {formatDurationMs(telemetry.preparationMsAverage)}</span></header><div className="platform-admin-telemetry-list">{telemetry.devices.length ? telemetry.devices.map((item) => <div key={item.key}><span>{telemetryLabels[item.key] ?? item.key}</span><strong>{item.total} · {formatRate(item.succeeded, item.total)} sucesso</strong><small>p90 {formatDurationMs(item.renderMsP90)}</small></div>) : <p>Sem dados nesta janela.</p>}</div></section>
             <section><header><strong>Falhas técnicas</strong><span>{telemetry.failed} falha(s) no período</span></header><div className="platform-admin-telemetry-list">{telemetry.errors.length ? telemetry.errors.map((item) => <div key={item.code}><span>{item.code}</span><strong>{item.total}</strong><small>{formatRate(item.total, telemetry.failed)} das falhas</small></div>) : <p>Nenhuma falha registrada.</p>}</div></section>
+            <section><header><strong>Feedback do beta</strong><span>{telemetry.feedbackCount} avaliação(ões) · {formatRate(telemetry.likedCount, telemetry.feedbackCount)} aprovação</span></header><div className="platform-admin-telemetry-list">{telemetry.feedbackReasons.length ? telemetry.feedbackReasons.map((item) => <div key={item.reason}><span>{item.reason === "other" ? "Outro motivo" : telemetryLabels[item.reason] ?? item.reason}</span><strong>{item.total}</strong><small>{formatRate(item.total, telemetry.dislikedCount)} das avaliações negativas</small></div>) : <p>{telemetry.dislikedCount > 0 ? "Nenhum motivo estruturado registrado." : "Nenhuma avaliação negativa registrada."}</p>}</div></section>
           </div>
         </> : <div className="platform-admin-empty">Sem telemetria disponível.</div>}
       </article>

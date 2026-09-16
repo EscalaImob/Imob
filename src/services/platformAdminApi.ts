@@ -126,6 +126,11 @@ export interface PlatformAiStudioTelemetryError {
   total: number;
 }
 
+export interface PlatformAiStudioTelemetryFeedbackReason {
+  reason: string;
+  total: number;
+}
+
 export interface PlatformAiStudioTelemetry {
   from: string;
   to: string;
@@ -138,6 +143,9 @@ export interface PlatformAiStudioTelemetry {
   webGpuUsedCount: number;
   wasmUsedCount: number;
   unknownVisionBackendCount: number;
+  feedbackCount: number;
+  likedCount: number;
+  dislikedCount: number;
   renderMsP50: number | null;
   renderMsP90: number | null;
   renderMsAverage: number | null;
@@ -147,6 +155,7 @@ export interface PlatformAiStudioTelemetry {
   browsers: PlatformAiStudioTelemetryBreakdown[];
   devices: PlatformAiStudioTelemetryBreakdown[];
   errors: PlatformAiStudioTelemetryError[];
+  feedbackReasons: PlatformAiStudioTelemetryFeedbackReason[];
 }
 
 export async function getPlatformAiStudioTelemetry(days = 30): Promise<PlatformAiStudioTelemetry> {

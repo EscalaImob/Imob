@@ -104,6 +104,15 @@ export interface AiStudioReelTelemetryInput {
   errorCode: string | null;
 }
 
+export type AiStudioReelFeedbackSentiment = "liked" | "disliked";
+export type AiStudioReelFeedbackReason = "movement" | "photo_selection" | "visual_quality" | "text_branding" | "performance" | "other";
+
+export interface AiStudioReelFeedbackInput {
+  generationId: string;
+  sentiment: AiStudioReelFeedbackSentiment;
+  reasons: AiStudioReelFeedbackReason[];
+}
+
 function apiBase(): string {
   const value = import.meta.env.VITE_API_URL?.trim();
   if (!value) throw new AppApiError("A plataforma ainda não está conectada à API.", "API_NOT_CONFIGURED");
@@ -168,6 +177,17 @@ export async function recordAiStudioReelTelemetry(
   input: AiStudioReelTelemetryInput,
 ): Promise<{ recorded: boolean }> {
   return aiStudioRequest(organizationId, `/portfolio/properties/${encodeURIComponent(propertyId)}/ai/reel-telemetry`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function recordAiStudioReelFeedback(
+  organizationId: string,
+  propertyId: string,
+  input: AiStudioReelFeedbackInput,
+): Promise<{ recorded: boolean }> {
+  return aiStudioRequest(organizationId, `/portfolio/properties/${encodeURIComponent(propertyId)}/ai/reel-feedback`, {
     method: "POST",
     body: JSON.stringify(input),
   });

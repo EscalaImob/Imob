@@ -6,11 +6,14 @@ import {
   generatePropertyMarketingText,
   getAiStudioRuntime,
   listAiStudioReelAssets,
+  recordAiStudioReelFeedback,
   recordAiStudioReelTelemetry,
   recordAiStudioReelUsage,
   uploadAiStudioReelFile,
   type AiStudioReelAsset,
   type AiStudioReelAssetMetadata,
+  type AiStudioReelFeedbackReason,
+  type AiStudioReelFeedbackSentiment,
   type AiStudioReelTelemetryInput,
   type AiStudioVisionBackend,
   type AiStudioRuntime,
@@ -57,6 +60,15 @@ type AnalysisByImage = Record<string, PropertyPhotoClassification>;
 type QualityByImage = Record<string, PropertyPhotoQuality>;
 
 const MAX_REEL_IMAGES = 8;
+
+const reelFeedbackReasonOptions: Array<{ value: AiStudioReelFeedbackReason; label: string }> = [
+  { value: "movement", label: "Movimento / animação" },
+  { value: "photo_selection", label: "Seleção ou ordem das fotos" },
+  { value: "visual_quality", label: "Qualidade visual" },
+  { value: "text_branding", label: "Textos ou marca" },
+  { value: "performance", label: "Demorou demais" },
+  { value: "other", label: "Outro motivo" },
+];
 
 function reelTelemetryClientProfile(): Pick<AiStudioReelTelemetryInput, "browserFamily" | "deviceClass" | "hardwareConcurrency" | "deviceMemoryGb"> {
   if (typeof navigator === "undefined") {
@@ -375,6 +387,11 @@ export function PropertyAiStudioPanel({
   const [reelAssetsLoading, setReelAssetsLoading] = useState(Boolean(propertyId && canUpdate));
   const [reelAssetSaving, setReelAssetSaving] = useState(false);
   const [reelAssetError, setReelAssetError] = useState<string | null>(null);
+  const [reelFeedbackSentiment, setReelFeedbackSentiment] = useState<AiStudioReelFeedbackSentiment | null>(null);
+  const [reelFeedbackReasons, setReelFeedbackReasons] = useState<AiStudioReelFeedbackReason[]>([]);
+  const [reelFeedbackBusy, setReelFeedbackBusy] = useState(false);
+  const [reelFeedbackSubmitted, setReelFeedbackSubmitted] = useState(false);
+  const [reelFeedbackError, setReelFeedbackError] = useState<string | null>(null);
   const runtimeDefaultsAppliedRef = useRef<string | null>(null);
   const reelDepthCacheRef = useRef<Map<string, PropertyDepthMap>>(new Map());
   const reelGenerationAttemptsRef = useRef(0);
@@ -435,6 +452,10 @@ export function PropertyAiStudioPanel({
     setVisionBackend(null);
     setLastAnalysisMs(null);
     setReelAssetError(null);
+    setReelFeedbackSentiment(null);
+    setReelFeedbackReasons([]);
+    setReelFeedbackSubmitted(false);
+    setReelFeedbackError(null);
     reelGenerationAttemptsRef.current = 0;
   }, [organizationId, propertyId]);
 
@@ -615,6 +636,10 @@ export function PropertyAiStudioPanel({
     setReelProgress({ phase: "loading", progress: 0, message: "Preparando fotos e profundidade..." });
     if (reelResult?.url) URL.revokeObjectURL(reelResult.url);
     setReelResult(null);
+    setReelFeedbackSentiment(null);
+    setReelFeedbackReasons([]);
+    setReelFeedbackSubmitted(false);
+    setReelFeedbackError(null);
 
     try {
       const freshImages = await listPropertyImages(organizationId, propertyId);
@@ -785,6 +810,49 @@ export function PropertyAiStudioPanel({
       setReelProgress(null);
     } finally {
       setReelBusy(false);
+    }
+  }
+
+  function toggleReelFeedbackReason(reason: AiStudioReelFeedbackReason) {
+    setReelFeedbackReasons((current) => {
+      if (current.includes(reason)) return current.filter((item) => item !== reason);
+      if (current.length >= 3) {
+        setReelFeedbackError("Selecione no máximo 3 motivos.");
+        return current;
+      }
+      setReelFeedbackError(null);
+      return [...current, reason];
+    });
+    setReelFeedbackSubmitted(false);
+  }
+
+  async function submitReelFeedback(sentiment: AiStudioReelFeedbackSentiment) {
+    if (!propertyId || !reelResult || reelFeedbackBusy || !reelResult.usageRecorded) return;
+    const reasons = sentiment === "disliked" ? reelFeedbackReasons : [];
+    if (sentiment === "disliked" && reasons.length === 0) {
+      setReelFeedbackSentiment("disliked");
+      setReelFeedbackError("Selecione ao menos um motivo para nos ajudar a melhorar o Reel Lite.");
+      return;
+    }
+
+    setReelFeedbackBusy(true);
+    setReelFeedbackError(null);
+    try {
+      await recordAiStudioReelFeedback(organizationId, propertyId, {
+        generationId: reelResult.generationId,
+        sentiment,
+        reasons,
+      });
+      setReelFeedbackSentiment(sentiment);
+      if (sentiment === "liked") {
+        setReelFeedbackReasons([]);
+      }
+      setReelFeedbackSubmitted(true);
+    } catch (error) {
+      setReelFeedbackSubmitted(false);
+      setReelFeedbackError(error instanceof AppApiError ? error.message : "Não foi possível registrar sua avaliação agora.");
+    } finally {
+      setReelFeedbackBusy(false);
     }
   }
 
@@ -1012,6 +1080,24 @@ export function PropertyAiStudioPanel({
             <button type="button" className="app-primary-button" onClick={() => void saveGeneratedReel()} disabled={reelAssetSaving || Boolean(savedCurrentReel) || !reelResult.usageRecorded}>{savedCurrentReel ? "Salvo no Estúdio" : reelAssetSaving ? "Salvando..." : !reelResult.usageRecorded ? "Registro pendente" : "Salvar no Estúdio"}</button>
           </div>
         </div>
+      </div>}
+      {reelResult && <div className="app-ai-reel-feedback">
+        <div>
+          <strong>Esse Reel ficou bom para publicar?</strong>
+          <span>Sua avaliação entra na telemetria do beta e ajuda a decidir os próximos ajustes do Estúdio IMOB.</span>
+        </div>
+        <div className="app-ai-reel-feedback-actions">
+          <button type="button" className={`app-secondary-button${reelFeedbackSentiment === "liked" ? " is-selected" : ""}`} onClick={() => void submitReelFeedback("liked")} disabled={reelFeedbackBusy || !reelResult.usageRecorded}>Gostei</button>
+          <button type="button" className={`app-secondary-button${reelFeedbackSentiment === "disliked" ? " is-selected" : ""}`} onClick={() => { setReelFeedbackSentiment("disliked"); setReelFeedbackSubmitted(false); setReelFeedbackError(null); }} disabled={reelFeedbackBusy || !reelResult.usageRecorded}>Não gostei</button>
+        </div>
+        {!reelResult.usageRecorded && <small>A avaliação será liberada quando o registro da geração for concluído.</small>}
+        {reelFeedbackSentiment === "disliked" && <div className="app-ai-reel-feedback-detail">
+          <span>O que mais pesou? Selecione até 3 motivos.</span>
+          <div className="app-ai-reel-feedback-reasons">{reelFeedbackReasonOptions.map((option) => <label key={option.value}><input type="checkbox" checked={reelFeedbackReasons.includes(option.value)} disabled={reelFeedbackBusy} onChange={() => toggleReelFeedbackReason(option.value)}/><span>{option.label}</span></label>)}</div>
+          <button type="button" className="app-primary-button" onClick={() => void submitReelFeedback("disliked")} disabled={reelFeedbackBusy || reelFeedbackReasons.length === 0 || !reelResult.usageRecorded}>{reelFeedbackBusy ? "Enviando..." : reelFeedbackSubmitted ? "Avaliação registrada" : "Enviar avaliação"}</button>
+        </div>}
+        {reelFeedbackSubmitted && reelFeedbackSentiment === "liked" && <div className="app-ai-reel-feedback-success">Avaliação registrada. Obrigado.</div>}
+        {reelFeedbackError && <div className="app-inline-error">{reelFeedbackError}</div>}
       </div>}
       {reelAssetError && <div className="app-inline-error">{reelAssetError}</div>}
       <div className="app-ai-reel-library">
