@@ -26,12 +26,15 @@ import {
   type ReelLiteTemplate,
 } from "../ai/reelLite";
 import {
+  analyzePropertyPhotoQuality,
   browserVisionSupport,
   classifyPropertyPhoto,
   estimatePropertyPhotoDepth,
+  propertyPhotoFingerprintSimilarity,
   resetBrowserVisionWorker,
   type PropertyDepthMap,
   type PropertyPhotoClassification,
+  type PropertyPhotoQuality,
 } from "../ai/browserVision";
 
 interface Props {
@@ -47,6 +50,57 @@ interface Props {
 }
 
 type AnalysisByImage = Record<string, PropertyPhotoClassification>;
+type QualityByImage = Record<string, PropertyPhotoQuality>;
+
+const MAX_REEL_IMAGES = 8;
+
+function recommendReelImageIds(
+  images: PropertyImageItem[],
+  analysis: AnalysisByImage,
+  quality: QualityByImage,
+): string[] {
+  const ranked = images
+    .map((image, index) => ({
+      image,
+      index,
+      category: analysis[image.id]?.category ?? "other",
+      quality: quality[image.id] ?? null,
+      score: (quality[image.id]?.score ?? 50) + (image.primary ? 12 : 0),
+    }))
+    .sort((left, right) => right.score - left.score || left.index - right.index);
+
+  const picked: typeof ranked = [];
+  const seenCategories = new Set<string>();
+  const isNearDuplicate = (candidate: (typeof ranked)[number]) =>
+    Boolean(candidate.quality?.fingerprint) && picked.some((selected) =>
+      Boolean(selected.quality?.fingerprint)
+      && propertyPhotoFingerprintSimilarity(candidate.quality!.fingerprint, selected.quality!.fingerprint) >= 0.94,
+    );
+  const add = (candidate: (typeof ranked)[number], allowDuplicate = false) => {
+    if (picked.some((item) => item.image.id === candidate.image.id)) return;
+    if (!allowDuplicate && isNearDuplicate(candidate)) return;
+    picked.push(candidate);
+    seenCategories.add(candidate.category);
+  };
+
+  const primary = ranked.find((candidate) => candidate.image.primary);
+  if (primary) add(primary, true);
+  for (const candidate of ranked) {
+    if (picked.length >= MAX_REEL_IMAGES) break;
+    if (!seenCategories.has(candidate.category)) add(candidate);
+  }
+  for (const candidate of ranked) {
+    if (picked.length >= MAX_REEL_IMAGES) break;
+    add(candidate);
+  }
+  for (const candidate of ranked) {
+    if (picked.length >= MAX_REEL_IMAGES) break;
+    add(candidate, true);
+  }
+
+  const selected = new Set(picked.map((candidate) => candidate.image.id));
+  return images.filter((image) => selected.has(image.id)).map((image) => image.id);
+}
 
 const textActions: Array<{ kind: AiStudioTextKind; label: string; description: string }> = [
   { kind: "property_description", label: "Descrição do imóvel", description: "Texto comercial para site e anúncio." },
@@ -217,6 +271,9 @@ export function PropertyAiStudioPanel({
   const [visionBusy, setVisionBusy] = useState(false);
   const [visionProgress, setVisionProgress] = useState<{ status: string | null; progress: number | null; file: string | null } | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisByImage>({});
+  const [quality, setQuality] = useState<QualityByImage>({});
+  const [selectedForReelIds, setSelectedForReelIds] = useState<string[]>([]);
+  const [reelSelectionReady, setReelSelectionReady] = useState(false);
   const [visionError, setVisionError] = useState<string | null>(null);
   const [depthImageId, setDepthImageId] = useState<string | null>(null);
   const [depth, setDepth] = useState<PropertyDepthMap | null>(null);
@@ -296,6 +353,9 @@ export function PropertyAiStudioPanel({
     reelDepthCacheRef.current.clear();
     setDepth(null);
     setAnalysis({});
+    setQuality({});
+    setSelectedForReelIds([]);
+    setReelSelectionReady(false);
     setVisionError(null);
     setReelAssetError(null);
   }, [organizationId, propertyId]);
@@ -356,27 +416,43 @@ export function PropertyAiStudioPanel({
       const freshImages = await listPropertyImages(organizationId, propertyId);
       setImages(freshImages);
       const next: AnalysisByImage = {};
-      const failedImages: string[] = [];
+      const nextQuality: QualityByImage = {};
+      const failedClassification: string[] = [];
+      const failedQuality: string[] = [];
       for (const image of freshImages) {
         try {
           // A imagem é baixada no contexto da página e enviada ao worker como bytes.
           // Assim, o modelo não depende de refazer fetch da URL assinada dentro do worker.
           next[image.id] = await classifyPhotoWithRetry(image.viewUrl, setVisionProgress);
         } catch (error) {
-          failedImages.push(image.originalName);
+          failedClassification.push(image.originalName);
           console.warn("[Estúdio IMOB] Falha na classificação local", {
             imageId: image.id,
             imageName: image.originalName,
             error: error instanceof Error ? error.message : "CLASSIFICATION_FAILED",
           });
         }
+        try {
+          nextQuality[image.id] = await analyzePropertyPhotoQuality(image.viewUrl);
+        } catch (error) {
+          failedQuality.push(image.originalName);
+          console.warn("[Estúdio IMOB] Falha na análise local de qualidade", {
+            imageId: image.id,
+            imageName: image.originalName,
+            error: error instanceof Error ? error.message : "QUALITY_FAILED",
+          });
+        }
         setAnalysis({ ...next });
+        setQuality({ ...nextQuality });
       }
-      if (failedImages.length > 0) {
+      setSelectedForReelIds(recommendReelImageIds(freshImages, next, nextQuality));
+      setReelSelectionReady(true);
+      if (failedClassification.length > 0 || failedQuality.length > 0) {
+        const failed = new Set([...failedClassification, ...failedQuality]).size;
         setVisionError(
-          failedImages.length === freshImages.length
-            ? "Não foi possível analisar as fotos localmente. Tente novamente; não é necessário remover ou reenviar as imagens."
-            : `A análise concluiu parcialmente. ${failedImages.length} foto(s) não puderam ser classificadas; tente novamente para completar.`,
+          failed >= freshImages.length
+            ? "A análise local ficou incompleta. Tente novamente; não é necessário remover ou reenviar as imagens."
+            : `A análise concluiu parcialmente. ${failed} foto(s) ficaram sem classificação ou nota de qualidade; tente novamente para completar.`,
         );
       }
     } catch (error) {
@@ -386,6 +462,29 @@ export function PropertyAiStudioPanel({
       setVisionBusy(false);
       setVisionProgress(null);
     }
+  }
+
+  function selectBestPhotos() {
+    if (images.length === 0) return;
+    setSelectedForReelIds(recommendReelImageIds(images, analysis, quality));
+    setReelSelectionReady(true);
+    setVisionError(null);
+  }
+
+  function toggleReelPhoto(imageId: string, checked: boolean) {
+    const defaultSelection = images.slice(0, MAX_REEL_IMAGES).map((image) => image.id);
+    setSelectedForReelIds((current) => {
+      const base = reelSelectionReady ? current : defaultSelection;
+      if (!checked) return base.filter((id) => id !== imageId);
+      if (base.includes(imageId)) return base;
+      if (base.length >= MAX_REEL_IMAGES) {
+        setVisionError(`O Reel Lite usa no máximo ${MAX_REEL_IMAGES} fotos.`);
+        return base;
+      }
+      setVisionError(null);
+      return [...base, imageId];
+    });
+    setReelSelectionReady(true);
   }
 
   async function calculateDepth() {
@@ -423,7 +522,12 @@ export function PropertyAiStudioPanel({
     try {
       const freshImages = await listPropertyImages(organizationId, propertyId);
       setImages(freshImages);
-      const selected = freshImages.slice(0, 6);
+      const selectedSet = new Set(selectedForReelIds);
+      const selected = (reelSelectionReady
+        ? freshImages.filter((image) => selectedSet.has(image.id))
+        : freshImages
+      ).slice(0, MAX_REEL_IMAGES);
+      if (selected.length === 0) throw new Error("NO_REEL_IMAGES_SELECTED");
       const sources: ReelLiteSource[] = [];
 
       for (let index = 0; index < selected.length; index += 1) {
@@ -504,7 +608,9 @@ export function PropertyAiStudioPanel({
       setReelError(
         code === "REEL_MP4_UNSUPPORTED"
           ? "Este navegador não oferece exportação MP4 local. Use Chrome, Edge ou Safari atualizado."
-          : "Não foi possível gerar o Reel Lite. As fotos continuam intactas; tente novamente.",
+          : code === "NO_REEL_IMAGES_SELECTED"
+            ? "Selecione ao menos uma foto para gerar o Reel Lite."
+            : "Não foi possível gerar o Reel Lite. As fotos continuam intactas; tente novamente.",
       );
       setReelProgress(null);
     } finally {
@@ -564,6 +670,9 @@ export function PropertyAiStudioPanel({
   const selectedDepthImage = images.find((item) => item.id === depthImageId) ?? null;
   const progressText = progressLabel(visionProgress);
   const savedCurrentReel = reelResult ? reelAssets.find((item) => item.generationId === reelResult.generationId) ?? null : null;
+  const selectedForReel = reelSelectionReady
+    ? images.filter((image) => selectedForReelIds.includes(image.id))
+    : images.slice(0, MAX_REEL_IMAGES);
 
   return <div className="app-ai-studio">
     <section className="app-ai-hero">
@@ -581,15 +690,32 @@ export function PropertyAiStudioPanel({
     </div>}
 
     <section className="app-form-section app-ai-section">
-      <div className="app-section-title-row"><div><h2>1. Organização das fotos com IA local</h2><p className="app-form-help">SigLIP roda no dispositivo. Na primeira execução o navegador baixa e armazena o modelo em cache.</p></div><button type="button" className="app-primary-button" onClick={() => void analyzePhotos()} disabled={visionBusy || loadingImages || images.length === 0 || !support.supported || Boolean(aiRuntimeError)}>{visionBusy ? "Processando..." : analysis && Object.keys(analysis).length === images.length && images.length ? "Análise concluída" : "Analisar fotos"}</button></div>
+      <div className="app-section-title-row app-ai-photo-heading">
+        <div><h2>1. Organização, qualidade e seleção local</h2><p className="app-form-help">SigLIP classifica os ambientes e heurísticas locais avaliam nitidez, exposição e contraste. A seleção recomenda até {MAX_REEL_IMAGES} fotos sem enviar imagens para uma API externa.</p></div>
+        <div className="app-ai-photo-heading-actions">
+          {Object.keys(quality).length > 0 && <button type="button" className="app-secondary-button" onClick={selectBestPhotos} disabled={visionBusy || loadingImages}>Selecionar melhores</button>}
+          <button type="button" className="app-primary-button" onClick={() => void analyzePhotos()} disabled={visionBusy || loadingImages || images.length === 0 || !support.supported || Boolean(aiRuntimeError)}>{visionBusy ? "Processando..." : Object.keys(analysis).length === images.length && Object.keys(quality).length === images.length && images.length ? "Análise concluída" : "Analisar e selecionar"}</button>
+        </div>
+      </div>
       {!support.supported && <div className="app-inline-error">Este navegador não oferece os recursos mínimos para executar a IA local.</div>}
       {progressText && <div className="app-property-uploading"><span className="app-spinner"/>{progressText}</div>}
       {visionError && <div className="app-inline-error">{visionError}</div>}
+      {images.length > 0 && <div className="app-ai-selection-summary"><strong>{selectedForReel.length} foto(s) no Reel</strong><span>{reelSelectionReady ? `Seleção atual · máximo ${MAX_REEL_IMAGES}` : `Aguardando análise · por enquanto serão usadas as primeiras ${Math.min(images.length, MAX_REEL_IMAGES)}`}</span></div>}
       {loadingImages ? <div className="app-table-empty"><span className="app-spinner"/>Carregando imagens...</div> : images.length === 0 ? <div className="app-soft-empty">Adicione fotos na aba Imagens antes de usar a análise local.</div> : <div className="app-ai-photo-grid">{images.map((image) => {
         const result = analysis[image.id];
-        return <article key={image.id}><img src={image.viewUrl} alt={image.originalName}/><div><strong>{result?.label ?? "Ainda não analisada"}</strong>{result ? <span>Classificação automática</span> : <span>{image.primary ? "Foto principal" : `Posição ${image.sortOrder + 1}`}</span>}</div></article>;
+        const photoQuality = quality[image.id];
+        const checked = reelSelectionReady ? selectedForReelIds.includes(image.id) : images.indexOf(image) < MAX_REEL_IMAGES;
+        return <article key={image.id} className={checked ? "is-selected" : undefined}>
+          <div className="app-ai-photo-image-wrap"><img src={image.viewUrl} alt={image.originalName}/>{photoQuality && <span className={`app-ai-quality-badge is-${photoQuality.label === "Ótima" ? "great" : photoQuality.label === "Boa" ? "good" : photoQuality.label === "Regular" ? "regular" : "weak"}`}>{photoQuality.score}/100 · {photoQuality.label}</span>}</div>
+          <div>
+            <strong>{result?.label ?? "Ainda não analisada"}</strong>
+            {result ? <span>Classificação automática</span> : <span>{image.primary ? "Foto principal" : `Posição ${image.sortOrder + 1}`}</span>}
+            {photoQuality && <small>Nitidez, luz e contraste avaliados localmente.</small>}
+            <label className="app-ai-photo-select"><input type="checkbox" checked={checked} onChange={(event: ChangeEvent<HTMLInputElement>) => toggleReelPhoto(image.id, event.target.checked)} disabled={reelBusy}/><span>Usar no Reel</span></label>
+          </div>
+        </article>;
       })}</div>}
-      <p className="app-ai-privacy-note">As fotos são processadas localmente pelo Transformers.js. Nenhum token da Hugging Face é usado no MVP.</p>
+      <p className="app-ai-privacy-note">Classificação, qualidade, seleção e depth são processados localmente no navegador. Nenhum token da Hugging Face é usado no MVP.</p>
     </section>
 
     <section className="app-form-section app-ai-section">
@@ -610,7 +736,7 @@ export function PropertyAiStudioPanel({
       <div className="app-section-title-row">
         <div>
           <h2>4. Reel Lite em MP4</h2>
-          <p className="app-form-help">Gera um vídeo vertical 9:16 no próprio navegador, usando até 6 fotos, movimento 2.5D quando a profundidade estiver disponível e composição da Escala IMOB.</p>
+          <p className="app-form-help">Gera um vídeo vertical 9:16 no próprio navegador, usando até {MAX_REEL_IMAGES} fotos selecionadas, movimento 2.5D quando a profundidade estiver disponível e composição da Escala IMOB.</p>
         </div>
         <span className="app-ai-runtime-badge">720 × 1280 · MP4</span>
       </div>
@@ -700,10 +826,10 @@ export function PropertyAiStudioPanel({
       </div>
       <div className="app-ai-reel-controls">
         <div>
-          <strong>{Math.min(images.length, 6)} foto(s) + CTA final</strong>
-          <span>Ordem da galeria · aproximadamente {reelLiteEstimatedDuration(Math.min(images.length, 6)).toFixed(1)} s · sem custo de API visual</span>
+          <strong>{selectedForReel.length} foto(s) selecionada(s) + CTA final</strong>
+          <span>Ordem da galeria · aproximadamente {reelLiteEstimatedDuration(selectedForReel.length).toFixed(1)} s · sem custo de API visual</span>
         </div>
-        <button type="button" className="app-primary-button" onClick={() => void generateReelLite()} disabled={reelBusy || images.length === 0 || !reelSupport.supported || aiRuntimeLoading || Boolean(aiRuntimeError) || aiRuntime?.quota.remaining === 0}>
+        <button type="button" className="app-primary-button" onClick={() => void generateReelLite()} disabled={reelBusy || images.length === 0 || selectedForReel.length === 0 || !reelSupport.supported || aiRuntimeLoading || Boolean(aiRuntimeError) || aiRuntime?.quota.remaining === 0}>
           {reelBusy ? "Gerando MP4..." : reelResult ? "Gerar novamente" : "Gerar Reel Lite MP4"}
         </button>
       </div>

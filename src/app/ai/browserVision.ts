@@ -22,6 +22,17 @@ export interface PropertyDepthMap {
   data: Uint8Array;
 }
 
+export interface PropertyPhotoQuality {
+  score: number;
+  label: "Ótima" | "Boa" | "Regular" | "Fraca";
+  brightness: number;
+  contrast: number;
+  sharpness: number;
+  darkClipping: number;
+  lightClipping: number;
+  fingerprint: string;
+}
+
 interface WorkerProgress {
   status: string | null;
   progress: number | null;
@@ -52,6 +63,113 @@ async function loadImagePayload(imageUrl: string): Promise<ImagePayload> {
   if (data.byteLength === 0) throw new Error("IMAGE_FETCH_EMPTY");
   const contentType = response.headers.get("content-type")?.split(";")[0]?.trim() || "image/jpeg";
   return { data, contentType };
+}
+
+function clamp(value: number, min = 0, max = 1): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function qualityLabel(score: number): PropertyPhotoQuality["label"] {
+  if (score >= 78) return "Ótima";
+  if (score >= 62) return "Boa";
+  if (score >= 45) return "Regular";
+  return "Fraca";
+}
+
+async function bitmapFromPayload(image: ImagePayload): Promise<ImageBitmap> {
+  if (typeof createImageBitmap !== "function") throw new Error("IMAGE_BITMAP_UNAVAILABLE");
+  return createImageBitmap(new Blob([image.data], { type: image.contentType }));
+}
+
+function averageHash(context: CanvasRenderingContext2D): string {
+  const sample = document.createElement("canvas");
+  sample.width = 8;
+  sample.height = 8;
+  const sampleContext = sample.getContext("2d", { willReadFrequently: true });
+  if (!sampleContext) return "";
+  sampleContext.drawImage(context.canvas, 0, 0, 8, 8);
+  const data = sampleContext.getImageData(0, 0, 8, 8).data;
+  const luminance: number[] = [];
+  for (let index = 0; index < data.length; index += 4) {
+    luminance.push(((data[index] ?? 0) * 0.2126 + (data[index + 1] ?? 0) * 0.7152 + (data[index + 2] ?? 0) * 0.0722) / 255);
+  }
+  const mean = luminance.reduce((sum, value) => sum + value, 0) / Math.max(1, luminance.length);
+  return luminance.map((value) => value >= mean ? "1" : "0").join("");
+}
+
+export async function analyzePropertyPhotoQuality(imageUrl: string): Promise<PropertyPhotoQuality> {
+  const image = await loadImagePayload(imageUrl);
+  const bitmap = await bitmapFromPayload(image);
+  try {
+    const maxSide = 192;
+    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(24, Math.round(bitmap.width * scale));
+    const height = Math.max(24, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("CANVAS_UNAVAILABLE");
+    context.drawImage(bitmap, 0, 0, width, height);
+    const pixels = context.getImageData(0, 0, width, height).data;
+    const luminance = new Float32Array(width * height);
+    let sum = 0;
+    let sumSquares = 0;
+    let dark = 0;
+    let light = 0;
+    for (let pixel = 0, offset = 0; pixel < luminance.length; pixel += 1, offset += 4) {
+      const value = (((pixels[offset] ?? 0) * 0.2126) + ((pixels[offset + 1] ?? 0) * 0.7152) + ((pixels[offset + 2] ?? 0) * 0.0722)) / 255;
+      luminance[pixel] = value;
+      sum += value;
+      sumSquares += value * value;
+      if (value <= 0.035) dark += 1;
+      if (value >= 0.965) light += 1;
+    }
+    const count = Math.max(1, luminance.length);
+    const brightness = sum / count;
+    const variance = Math.max(0, (sumSquares / count) - brightness * brightness);
+    const contrast = Math.sqrt(variance);
+    let gradientSum = 0;
+    let gradientCount = 0;
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const index = y * width + x;
+        const dx = Math.abs((luminance[index + 1] ?? 0) - (luminance[index - 1] ?? 0));
+        const dy = Math.abs((luminance[index + width] ?? 0) - (luminance[index - width] ?? 0));
+        gradientSum += (dx + dy) / 2;
+        gradientCount += 1;
+      }
+    }
+    const sharpness = gradientSum / Math.max(1, gradientCount);
+    const darkClipping = dark / count;
+    const lightClipping = light / count;
+    const exposureScore = clamp(1 - Math.abs(brightness - 0.52) / 0.5);
+    const contrastScore = clamp((contrast - 0.06) / 0.2);
+    const sharpnessScore = clamp((sharpness - 0.018) / 0.095);
+    const clippingScore = clamp(1 - ((darkClipping + lightClipping) * 2.6));
+    const score = Math.round(clamp(
+      exposureScore * 0.3 + contrastScore * 0.22 + sharpnessScore * 0.34 + clippingScore * 0.14,
+    ) * 100);
+    return {
+      score,
+      label: qualityLabel(score),
+      brightness,
+      contrast,
+      sharpness,
+      darkClipping,
+      lightClipping,
+      fingerprint: averageHash(context),
+    };
+  } finally {
+    bitmap.close();
+  }
+}
+
+export function propertyPhotoFingerprintSimilarity(left: string, right: string): number {
+  if (!left || !right || left.length !== right.length) return 0;
+  let equal = 0;
+  for (let index = 0; index < left.length; index += 1) if (left[index] === right[index]) equal += 1;
+  return equal / Math.max(1, left.length);
 }
 
 const labelMap: Record<string, { category: PropertyPhotoCategory; label: string }> = {
