@@ -1741,7 +1741,7 @@ export function App() {
   }
 
   function handleOpenOrganizationWorkspace() {
-    if (!bootstrap?.activeOrganization) return;
+    if (!bootstrap?.activeOrganization || bootstrap.organizations.length === 0) return;
     saveWorkspaceMode("organization");
     setWorkspaceMode("organization");
     const destination = "/app/";
@@ -1780,7 +1780,9 @@ export function App() {
         canManage={canManagePlatform}
         onLogout={handleLogout}
         onOpenOrganization={
-          activeOrganization ? handleOpenOrganizationWorkspace : null
+          activeOrganization && bootstrap.organizations.length > 0
+            ? handleOpenOrganizationWorkspace
+            : null
         }
       />
     );
