@@ -7,6 +7,7 @@ import {
   type SVGProps,
 } from "react";
 import brandLogo from "../assets/brand/escala-imob-original.svg";
+import platformBrandLogo from "../assets/brand/escala-imob-white.png";
 import { clearAuthSession, ensureValidAuthSession } from "../auth/session";
 import {
   AppApiError,
@@ -628,7 +629,7 @@ function PlatformConsoleShell({
       />
       <aside className="platform-console-sidebar" aria-label="Console da plataforma">
         <div className="platform-console-brand">
-          <img src={brandLogo} alt="Escala IMOB" />
+          <img src={platformBrandLogo} alt="Escala IMOB" />
           <div>
             <strong>Console</strong>
             <span>Administração da plataforma</span>

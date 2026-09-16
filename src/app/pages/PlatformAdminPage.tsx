@@ -99,30 +99,46 @@ export function PlatformAdminPage() {
   const load = useCallback(async (nextFilters: PlatformAccessKeyFilters = filters) => {
     setLoading(true);
     setMessage(null);
-    try {
-      const [summary, accessKeys, aiStudioOrganizations] = await Promise.all([
-        getPlatformOverview(),
-        listPlatformAccessKeys(nextFilters),
-        listPlatformAiStudioOrganizations(),
-      ]);
-      setOverview(summary);
-      setKeys(accessKeys);
+
+    const [overviewResult, accessKeysResult, aiStudioOrganizationsResult, telemetryResult] = await Promise.allSettled([
+      getPlatformOverview(),
+      listPlatformAccessKeys(nextFilters),
+      listPlatformAiStudioOrganizations(),
+      getPlatformAiStudioTelemetry(telemetryDays),
+    ]);
+
+    const failures: string[] = [];
+    const failureMessage = (label: string, reason: unknown) => {
+      const detail = reason instanceof AppApiError ? reason.message : "operação indisponível";
+      failures.push(`${label}: ${detail}`);
+    };
+
+    if (overviewResult.status === "fulfilled") setOverview(overviewResult.value);
+    else { setOverview(null); failureMessage("Visão geral", overviewResult.reason); }
+
+    if (accessKeysResult.status === "fulfilled") setKeys(accessKeysResult.value);
+    else { setKeys([]); failureMessage("Chaves de acesso", accessKeysResult.reason); }
+
+    if (aiStudioOrganizationsResult.status === "fulfilled") {
+      const aiStudioOrganizations = aiStudioOrganizationsResult.value;
       setAiOrganizations(aiStudioOrganizations);
       setAiDrafts(Object.fromEntries(aiStudioOrganizations.map((item) => [item.organizationId, aiStudioDraft(item)])));
-      try {
-        setTelemetry(await getPlatformAiStudioTelemetry(telemetryDays));
-      } catch (telemetryError) {
-        console.warn("[Admin Escala IMOB] Telemetria do Estúdio IA indisponível", telemetryError);
-        setTelemetry(null);
-      }
-    } catch (error) {
+    } else {
+      setAiOrganizations([]);
+      setAiDrafts({});
+      failureMessage("Organizações e planos", aiStudioOrganizationsResult.reason);
+    }
+
+    if (telemetryResult.status === "fulfilled") setTelemetry(telemetryResult.value);
+    else { setTelemetry(null); console.warn("[Admin Escala IMOB] Telemetria do Estúdio IA indisponível", telemetryResult.reason); }
+
+    if (failures.length > 0) {
       setMessage({
         tone: "error",
-        text: error instanceof AppApiError ? error.message : "Não foi possível carregar a administração da plataforma.",
+        text: `Algumas áreas do console não puderam ser carregadas. ${failures.join(" · ")}`,
       });
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   }, [filters, telemetryDays]);
 
   useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
