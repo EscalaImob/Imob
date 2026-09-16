@@ -11,7 +11,14 @@ type ProgressPayload = {
 type VisionBackend = "webgpu" | "wasm";
 type ZeroShotResult = Array<{ label: string; score: number }>;
 type PipelineCallable = (...args: unknown[]) => Promise<unknown>;
+type TransformersEnvironment = {
+  allowLocalModels: boolean;
+  allowRemoteModels: boolean;
+  useBrowserCache: boolean;
+};
+
 type TransformersModule = {
+  env: TransformersEnvironment;
   pipeline: (
     task: string,
     model: string,
@@ -25,10 +32,7 @@ type WorkerScope = {
 };
 
 const scope = globalThis as unknown as WorkerScope;
-const TRANSFORMERS_ESM_CANDIDATES = [
-  "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/+esm",
-  "https://esm.sh/@huggingface/transformers@3.8.1?bundle",
-] as const;
+const TRANSFORMERS_VERSION = "3.8.1";
 const CLASSIFICATION_MODEL = "Xenova/siglip-base-patch16-224";
 const DEPTH_MODEL = "onnx-community/depth-anything-v2-small";
 const labels = [
@@ -51,15 +55,16 @@ let depthWebGpuDisabled = false;
 function transformers(): Promise<TransformersModule> {
   if (!transformersPromise) {
     transformersPromise = (async () => {
-      let lastError: unknown;
-      for (const source of TRANSFORMERS_ESM_CANDIDATES) {
-        try {
-          return await import(/* @vite-ignore */ source) as TransformersModule;
-        } catch (error) {
-          lastError = error;
-        }
+      try {
+        const module = await import("@huggingface/transformers") as unknown as TransformersModule;
+        module.env.allowLocalModels = false;
+        module.env.allowRemoteModels = true;
+        module.env.useBrowserCache = true;
+        return module;
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "unknown";
+        throw new Error(`TRANSFORMERS_${TRANSFORMERS_VERSION}_LOAD_FAILED:${detail}`);
       }
-      throw lastError instanceof Error ? lastError : new Error("TRANSFORMERS_IMPORT_FAILED");
     })();
   }
   return transformersPromise;
