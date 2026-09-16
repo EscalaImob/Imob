@@ -77,6 +77,7 @@ export interface AiStudioReelUsageInput {
 }
 
 export type AiStudioReelTelemetryStatus = "succeeded" | "failed";
+export type AiStudioVisionBackend = "webgpu" | "wasm" | "mixed" | "none";
 export type AiStudioBrowserFamily = "chromium" | "safari" | "firefox" | "other";
 export type AiStudioDeviceClass = "desktop" | "mobile" | "tablet" | "unknown";
 
@@ -90,6 +91,7 @@ export interface AiStudioReelTelemetryInput {
   analysisMs: number | null;
   outputBytes: number | null;
   webGpuAvailable: boolean;
+  visionBackend: AiStudioVisionBackend;
   renderer: "canvas_media_recorder";
   audioIncluded: boolean;
   regeneration: boolean;

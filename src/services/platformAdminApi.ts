@@ -135,6 +135,9 @@ export interface PlatformAiStudioTelemetry {
   failed: number;
   regenerationCount: number;
   webGpuCount: number;
+  webGpuUsedCount: number;
+  wasmUsedCount: number;
+  unknownVisionBackendCount: number;
   renderMsP50: number | null;
   renderMsP90: number | null;
   renderMsAverage: number | null;

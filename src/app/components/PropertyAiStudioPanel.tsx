@@ -12,6 +12,7 @@ import {
   type AiStudioReelAsset,
   type AiStudioReelAssetMetadata,
   type AiStudioReelTelemetryInput,
+  type AiStudioVisionBackend,
   type AiStudioRuntime,
   type AiStudioTextKind,
   type AiStudioTextResult,
@@ -37,6 +38,7 @@ import {
   type PropertyDepthMap,
   type PropertyPhotoClassification,
   type PropertyPhotoQuality,
+  type PropertyVisionBackend,
 } from "../ai/browserVision";
 
 interface Props {
@@ -86,6 +88,36 @@ function reelTelemetryClientProfile(): Pick<AiStudioReelTelemetryInput, "browser
     ? Math.min(256, deviceMemory)
     : null;
   return { browserFamily, deviceClass, hardwareConcurrency, deviceMemoryGb };
+}
+
+function mergeVisionBackend(current: AiStudioVisionBackend | null, next: PropertyVisionBackend): AiStudioVisionBackend {
+  if (!current || current === "none") return next;
+  if (current === next || current === "mixed") return current;
+  return "mixed";
+}
+
+function summarizeVisionBackends(backends: Set<PropertyVisionBackend>): AiStudioVisionBackend {
+  if (backends.size === 0) return "none";
+  if (backends.size > 1) return "mixed";
+  return backends.has("webgpu") ? "webgpu" : "wasm";
+}
+
+function reelDepthCalculationLimit(
+  profile: Pick<AiStudioReelTelemetryInput, "deviceClass" | "hardwareConcurrency" | "deviceMemoryGb">,
+  webGpuAvailable: boolean,
+  imageCount: number,
+): number {
+  const count = Math.max(0, Math.min(MAX_REEL_IMAGES, imageCount));
+  if (count === 0) return 0;
+  const veryConstrained = (profile.deviceMemoryGb !== null && profile.deviceMemoryGb <= 2)
+    || (profile.hardwareConcurrency !== null && profile.hardwareConcurrency <= 2);
+  if (veryConstrained) return Math.min(2, count);
+  const constrained = !webGpuAvailable
+    || profile.deviceClass === "mobile"
+    || profile.deviceClass === "tablet"
+    || (profile.deviceMemoryGb !== null && profile.deviceMemoryGb <= 4)
+    || (profile.hardwareConcurrency !== null && profile.hardwareConcurrency <= 4);
+  return constrained ? Math.min(4, count) : count;
 }
 
 function reelTelemetryErrorCode(error: unknown): string {
@@ -152,6 +184,7 @@ const textActions: Array<{ kind: AiStudioTextKind; label: string; description: s
 function progressLabel(progress: { status: string | null; progress: number | null; file: string | null } | null): string | null {
   if (!progress) return null;
   if (progress.progress !== null) return `Baixando modelo local · ${Math.round(progress.progress)}%`;
+  if (progress.status === "webgpu_fallback") return "WebGPU não ficou estável para este modelo; continuando em WASM.";
   if (progress.status === "ready") return "Modelo local pronto.";
   return progress.status ? "Preparando modelo local..." : null;
 }
@@ -314,6 +347,7 @@ export function PropertyAiStudioPanel({
   const [selectedForReelIds, setSelectedForReelIds] = useState<string[]>([]);
   const [reelSelectionReady, setReelSelectionReady] = useState(false);
   const [visionError, setVisionError] = useState<string | null>(null);
+  const [visionBackend, setVisionBackend] = useState<AiStudioVisionBackend | null>(null);
   const [lastAnalysisMs, setLastAnalysisMs] = useState<number | null>(null);
   const [depthImageId, setDepthImageId] = useState<string | null>(null);
   const [depth, setDepth] = useState<PropertyDepthMap | null>(null);
@@ -398,6 +432,7 @@ export function PropertyAiStudioPanel({
     setSelectedForReelIds([]);
     setReelSelectionReady(false);
     setVisionError(null);
+    setVisionBackend(null);
     setLastAnalysisMs(null);
     setReelAssetError(null);
     reelGenerationAttemptsRef.current = 0;
@@ -467,7 +502,9 @@ export function PropertyAiStudioPanel({
         try {
           // A imagem é baixada no contexto da página e enviada ao worker como bytes.
           // Assim, o modelo não depende de refazer fetch da URL assinada dentro do worker.
-          next[image.id] = await classifyPhotoWithRetry(image.viewUrl, setVisionProgress);
+          const classification = await classifyPhotoWithRetry(image.viewUrl, setVisionProgress);
+          next[image.id] = classification;
+          setVisionBackend((current) => mergeVisionBackend(current, classification.backend));
         } catch (error) {
           failedClassification.push(image.originalName);
           console.warn("[Estúdio IMOB] Falha na classificação local", {
@@ -542,6 +579,7 @@ export function PropertyAiStudioPanel({
     try {
       const nextDepth = await estimateDepthWithRetry(selected.viewUrl, setVisionProgress);
       reelDepthCacheRef.current.set(selected.id, nextDepth);
+      setVisionBackend((current) => mergeVisionBackend(current, nextDepth.backend));
       setDepth(nextDepth);
     } catch {
       setVisionError("Não foi possível calcular a profundidade desta foto no navegador.");
@@ -569,6 +607,7 @@ export function PropertyAiStudioPanel({
     let renderMs = 0;
     let depthCacheHits = 0;
     let depthCalculated = 0;
+    let telemetryVisionBackend: AiStudioVisionBackend = "none";
 
     setReelBusy(true);
     setReelError(null);
@@ -587,23 +626,40 @@ export function PropertyAiStudioPanel({
       ).slice(0, MAX_REEL_IMAGES);
       telemetryImageCount = selected.length;
       if (selected.length === 0) throw new Error("NO_REEL_IMAGES_SELECTED");
+      const depthCalculationLimit = reelDepthCalculationLimit(clientProfile, support.webGpu, selected.length);
+      const generationVisionBackends = new Set<PropertyVisionBackend>();
+      for (const image of selected) {
+        const classifiedBackend = analysis[image.id]?.backend;
+        if (classifiedBackend) generationVisionBackends.add(classifiedBackend);
+      }
+      telemetryVisionBackend = summarizeVisionBackends(generationVisionBackends);
       const sources: ReelLiteSource[] = [];
       const preparationStartedAt = performance.now();
 
       for (let index = 0; index < selected.length; index += 1) {
         const image = selected[index]!;
+        let imageDepth: PropertyDepthMap | null = reelDepthCacheRef.current.get(image.id) ?? null;
+        const shouldCalculateDepth = index < depthCalculationLimit;
         setReelProgress({
           phase: "loading",
           progress: index / Math.max(1, selected.length),
-          message: `Calculando profundidade · foto ${index + 1} de ${selected.length}...`,
+          message: imageDepth
+            ? `Reutilizando profundidade · foto ${index + 1} de ${selected.length}...`
+            : shouldCalculateDepth
+              ? `Calculando profundidade · foto ${index + 1} de ${selected.length}...`
+              : `Modo compatibilidade · preparando foto ${index + 1} de ${selected.length}...`,
         });
-        let imageDepth: PropertyDepthMap | null = reelDepthCacheRef.current.get(image.id) ?? null;
         if (imageDepth) {
           depthCacheHits += 1;
-        } else {
+          generationVisionBackends.add(imageDepth.backend);
+          telemetryVisionBackend = summarizeVisionBackends(generationVisionBackends);
+        } else if (shouldCalculateDepth) {
           try {
             imageDepth = await estimateDepthWithRetry(image.viewUrl);
             reelDepthCacheRef.current.set(image.id, imageDepth);
+            generationVisionBackends.add(imageDepth.backend);
+            telemetryVisionBackend = summarizeVisionBackends(generationVisionBackends);
+            setVisionBackend((current) => mergeVisionBackend(current, imageDepth!.backend));
             depthCalculated += 1;
           } catch (error) {
             console.warn("[Estúdio IMOB] Profundidade indisponível no Reel Lite; usando movimento simples.", {
@@ -659,6 +715,7 @@ export function PropertyAiStudioPanel({
         analysisMs: lastAnalysisMs,
         outputBytes: result.blob.size,
         webGpuAvailable: support.webGpu,
+        visionBackend: telemetryVisionBackend,
         renderer: "canvas_media_recorder",
         audioIncluded: result.audioIncluded,
         regeneration,
@@ -704,6 +761,7 @@ export function PropertyAiStudioPanel({
           analysisMs: lastAnalysisMs,
           outputBytes: null,
           webGpuAvailable: support.webGpu,
+          visionBackend: telemetryVisionBackend,
           renderer: "canvas_media_recorder",
           audioIncluded: requestedAudio,
           regeneration,
@@ -831,7 +889,7 @@ export function PropertyAiStudioPanel({
     </section>
 
     <section className="app-form-section app-ai-section">
-      <div className="app-section-title-row"><div><h2>2. Profundidade e movimento 2.5D</h2><p className="app-form-help">Depth Anything V2 calcula um mapa de profundidade local para preparar o efeito de câmera do Reel Lite.</p></div><span className="app-ai-runtime-badge">{support.webGpu ? "WebGPU disponível" : "WASM compatível"}</span></div>
+      <div className="app-section-title-row"><div><h2>2. Profundidade e movimento 2.5D</h2><p className="app-form-help">Depth Anything V2 calcula um mapa de profundidade local para preparar o efeito de câmera do Reel Lite.</p></div><span className="app-ai-runtime-badge">{visionBackend === "webgpu" ? "WebGPU em uso" : visionBackend === "wasm" ? "WASM em uso" : visionBackend === "mixed" ? "WebGPU + fallback WASM" : support.webGpu ? "WebGPU será priorizado" : "WASM compatível"}</span></div>
       {images.length > 0 && <div className="app-ai-depth-controls"><label><span>Foto para testar</span><select value={depthImageId ?? ""} onChange={(event: ChangeEvent<HTMLSelectElement>) => { setDepthImageId(event.target.value || null); setDepth(null); }}>{images.map((image, index) => <option key={image.id} value={image.id}>{index + 1}. {analysis[image.id]?.label ?? image.originalName}</option>)}</select></label><button type="button" className="app-secondary-button" onClick={() => void calculateDepth()} disabled={visionBusy || !selectedDepthImage || Boolean(aiRuntimeError)}>{depth ? "Recalcular profundidade" : "Calcular profundidade"}</button></div>}
       {depth && selectedDepthImage ? <DepthParallaxPreview imageUrl={selectedDepthImage.viewUrl} depth={depth}/> : <div className="app-soft-empty">Escolha uma foto e calcule a profundidade para testar o movimento 2.5D.</div>}
     </section>
@@ -939,7 +997,7 @@ export function PropertyAiStudioPanel({
       <div className="app-ai-reel-controls">
         <div>
           <strong>{selectedForReel.length} foto(s) selecionada(s) + CTA final</strong>
-          <span>Ordem da galeria · vídeo de aproximadamente {reelLiteEstimatedDuration(selectedForReel.length).toFixed(1)} s · a composição local leva cerca desse tempo · sem custo de API visual</span>
+          <span>Ordem da galeria · vídeo de aproximadamente {reelLiteEstimatedDuration(selectedForReel.length).toFixed(1)} s · a composição local leva cerca desse tempo · sem custo de API visual. Em dispositivos limitados, o Reel mantém todas as fotos e reduz apenas os cálculos de profundidade.</span>
         </div>
         <button type="button" className="app-primary-button" onClick={() => void generateReelLite()} disabled={reelBusy || images.length === 0 || selectedForReel.length === 0 || !reelSupport.supported || aiRuntimeLoading || Boolean(aiRuntimeError) || aiRuntime?.quota.remaining === 0}>
           {reelBusy ? "Gerando MP4..." : reelResult ? "Gerar novamente" : "Gerar Reel Lite MP4"}

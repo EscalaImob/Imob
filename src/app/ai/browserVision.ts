@@ -9,17 +9,21 @@ export type PropertyPhotoCategory =
   | "outdoor"
   | "other";
 
+export type PropertyVisionBackend = "webgpu" | "wasm";
+
 export interface PropertyPhotoClassification {
   category: PropertyPhotoCategory;
   label: string;
   confidence: number;
   scores: Array<{ category: PropertyPhotoCategory; label: string; confidence: number }>;
+  backend: PropertyVisionBackend;
 }
 
 export interface PropertyDepthMap {
   width: number;
   height: number;
   data: Uint8Array;
+  backend: PropertyVisionBackend;
 }
 
 export interface PropertyPhotoQuality {
@@ -221,6 +225,7 @@ function visionWorker(): Worker {
         status?: unknown;
         progress?: unknown;
         file?: unknown;
+        backend?: unknown;
       };
       if (typeof message.id !== "string") return;
       const request = pending.get(message.id);
@@ -285,11 +290,12 @@ export async function classifyPropertyPhoto(
   onProgress?: (progress: WorkerProgress) => void,
 ): Promise<PropertyPhotoClassification> {
   const image = await loadImagePayload(imageUrl);
-  const message = await request<{ result?: unknown }>(
+  const message = await request<{ result?: unknown; backend?: unknown }>(
     { type: "classify", imageData: image.data, contentType: image.contentType },
     onProgress,
   );
   if (!Array.isArray(message.result) || message.result.length === 0) throw new Error("CLASSIFICATION_EMPTY");
+  if (message.backend !== "webgpu" && message.backend !== "wasm") throw new Error("VISION_BACKEND_INVALID");
   const rawScores = message.result.flatMap((item) => {
     if (!item || typeof item !== "object") return [];
     const candidate = item as { label?: unknown; score?: unknown };
@@ -303,7 +309,7 @@ export async function classifyPropertyPhoto(
     .sort((left, right) => right.confidence - left.confidence);
   const best = scores[0];
   if (!best) throw new Error("CLASSIFICATION_EMPTY");
-  return { ...best, scores };
+  return { ...best, scores, backend: message.backend };
 }
 
 export async function estimatePropertyPhotoDepth(
@@ -311,14 +317,15 @@ export async function estimatePropertyPhotoDepth(
   onProgress?: (progress: WorkerProgress) => void,
 ): Promise<PropertyDepthMap> {
   const image = await loadImagePayload(imageUrl);
-  const message = await request<{ data?: unknown; width?: unknown; height?: unknown }>(
+  const message = await request<{ data?: unknown; width?: unknown; height?: unknown; backend?: unknown }>(
     { type: "depth", imageData: image.data, contentType: image.contentType },
     onProgress,
   );
   if (!(message.data instanceof ArrayBuffer) || typeof message.width !== "number" || typeof message.height !== "number") {
     throw new Error("DEPTH_OUTPUT_INVALID");
   }
-  return { width: message.width, height: message.height, data: new Uint8Array(message.data) };
+  if (message.backend !== "webgpu" && message.backend !== "wasm") throw new Error("VISION_BACKEND_INVALID");
+  return { width: message.width, height: message.height, data: new Uint8Array(message.data), backend: message.backend };
 }
 
 export function browserVisionSupport(): { supported: boolean; webGpu: boolean } {

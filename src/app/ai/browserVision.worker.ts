@@ -8,6 +8,7 @@ type ProgressPayload = {
   file?: string;
 };
 
+type VisionBackend = "webgpu" | "wasm";
 type ZeroShotResult = Array<{ label: string; score: number }>;
 type PipelineCallable = (...args: unknown[]) => Promise<unknown>;
 type TransformersModule = {
@@ -42,8 +43,10 @@ const labels = [
 ];
 
 let transformersPromise: Promise<TransformersModule> | null = null;
-let classifierPromise: Promise<PipelineCallable> | null = null;
-let depthPromise: Promise<PipelineCallable> | null = null;
+const classifierPromises = new Map<VisionBackend, Promise<PipelineCallable>>();
+const depthPromises = new Map<VisionBackend, Promise<PipelineCallable>>();
+let classifierWebGpuDisabled = false;
+let depthWebGpuDisabled = false;
 
 function transformers(): Promise<TransformersModule> {
   if (!transformersPromise) {
@@ -77,26 +80,62 @@ function progressFor(id: string) {
   };
 }
 
-async function classifier(id: string): Promise<PipelineCallable> {
-  if (!classifierPromise) {
-    classifierPromise = transformers().then(({ pipeline }) => pipeline(
-      "zero-shot-image-classification",
-      CLASSIFICATION_MODEL,
-      { dtype: "q8", progress_callback: progressFor(id) },
-    ));
-  }
-  return classifierPromise;
+function hasWorkerWebGpu(): boolean {
+  const workerNavigator = globalThis.navigator as Navigator & { gpu?: unknown };
+  return Boolean(workerNavigator?.gpu);
 }
 
-async function depthEstimator(id: string): Promise<PipelineCallable> {
-  if (!depthPromise) {
-    depthPromise = transformers().then(({ pipeline }) => pipeline(
-      "depth-estimation",
-      DEPTH_MODEL,
-      { dtype: "q8", progress_callback: progressFor(id) },
+async function createPipeline(
+  kind: "classifier" | "depth",
+  id: string,
+  backend: VisionBackend,
+): Promise<PipelineCallable> {
+  const cache = kind === "classifier" ? classifierPromises : depthPromises;
+  let existing = cache.get(backend);
+  if (!existing) {
+    const task = kind === "classifier" ? "zero-shot-image-classification" : "depth-estimation";
+    const model = kind === "classifier" ? CLASSIFICATION_MODEL : DEPTH_MODEL;
+    existing = transformers().then(({ pipeline }) => pipeline(
+      task,
+      model,
+      { dtype: "q8", device: backend, progress_callback: progressFor(id) },
     ));
+    cache.set(backend, existing);
+    existing.catch(() => {
+      if (cache.get(backend) === existing) cache.delete(backend);
+    });
   }
-  return depthPromise;
+  return existing;
+}
+
+async function runWithFallback<T>(
+  kind: "classifier" | "depth",
+  id: string,
+  execute: (pipe: PipelineCallable) => Promise<T>,
+): Promise<{ result: T; backend: VisionBackend }> {
+  const webGpuDisabled = kind === "classifier" ? classifierWebGpuDisabled : depthWebGpuDisabled;
+  const backends: VisionBackend[] = hasWorkerWebGpu() && !webGpuDisabled ? ["webgpu", "wasm"] : ["wasm"];
+  let lastError: unknown;
+
+  for (const backend of backends) {
+    try {
+      const pipe = await createPipeline(kind, id, backend);
+      return { result: await execute(pipe), backend };
+    } catch (error) {
+      lastError = error;
+      if (backend === "webgpu") {
+        if (kind === "classifier") classifierWebGpuDisabled = true;
+        else depthWebGpuDisabled = true;
+        const cache = kind === "classifier" ? classifierPromises : depthPromises;
+        cache.delete("webgpu");
+        scope.postMessage({ id, type: "progress", status: "webgpu_fallback", progress: null, file: null });
+        continue;
+      }
+      break;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("VISION_PIPELINE_FAILED");
 }
 
 function normalizedClassification(value: unknown): ZeroShotResult {
@@ -115,10 +154,7 @@ function depthPayload(value: unknown): { data: Uint8Array; width: number; height
   if (!depth || typeof depth !== "object") throw new Error("DEPTH_OUTPUT_INVALID");
   const raw = depth as { data?: unknown; width?: unknown; height?: unknown };
   const pixelData = raw.data;
-  if (
-    !(pixelData instanceof Uint8Array)
-    && !(pixelData instanceof Uint8ClampedArray)
-  ) {
+  if (!(pixelData instanceof Uint8Array) && !(pixelData instanceof Uint8ClampedArray)) {
     throw new Error("DEPTH_OUTPUT_INVALID");
   }
   if (typeof raw.width !== "number" || typeof raw.height !== "number") {
@@ -148,30 +184,24 @@ scope.onmessage = (event) => {
   void (async () => {
     try {
       if (request.type === "classify") {
-        const pipe = await classifier(request.id);
-        const result = normalizedClassification(await withLocalImage(
+        const execution = await runWithFallback("classifier", request.id, async (pipe) => normalizedClassification(await withLocalImage(
           request,
-          (imageUrl) => pipe(
-            imageUrl,
-            labels,
-            { hypothesis_template: "{}" },
-          ),
-        ));
-        scope.postMessage({ id: request.id, type: "classification", result });
+          (imageUrl) => pipe(imageUrl, labels, { hypothesis_template: "{}" }),
+        )));
+        scope.postMessage({ id: request.id, type: "classification", result: execution.result, backend: execution.backend });
         return;
       }
 
-      const pipe = await depthEstimator(request.id);
-      const result = depthPayload(await withLocalImage(
+      const execution = await runWithFallback("depth", request.id, async (pipe) => depthPayload(await withLocalImage(
         request,
         (imageUrl) => pipe(imageUrl),
-      ));
-      const buffer = result.data.buffer.slice(
-        result.data.byteOffset,
-        result.data.byteOffset + result.data.byteLength,
+      )));
+      const buffer = execution.result.data.buffer.slice(
+        execution.result.data.byteOffset,
+        execution.result.data.byteOffset + execution.result.data.byteLength,
       );
       scope.postMessage(
-        { id: request.id, type: "depth", width: result.width, height: result.height, data: buffer },
+        { id: request.id, type: "depth", width: execution.result.width, height: execution.result.height, data: buffer, backend: execution.backend },
         [buffer],
       );
     } catch (error) {
