@@ -616,6 +616,7 @@ function PlatformConsoleShell({
     { label: "Visão geral", href: "/app/admin/#platform-overview", icon: GridIcon },
     { label: "Usuários", href: "/app/admin/#platform-users", icon: UsersIcon },
     { label: "Auditoria", href: "/app/admin/#platform-audit", icon: DocumentIcon },
+    { label: "Operação", href: "/app/admin/#platform-operations", icon: TargetIcon },
     { label: "Organizações e planos", href: "/app/admin/#platform-organizations", icon: BuildingIcon },
     { label: "Telemetria", href: "/app/admin/#platform-telemetry", icon: ChartIcon },
     { label: "Chaves de acesso", href: "/app/admin/#platform-access-keys", icon: DocumentIcon },

@@ -3,6 +3,7 @@ import { AppApiError } from "../../services/appApi";
 import {
   createPlatformAccessKey,
   getPlatformAiStudioTelemetry,
+  getPlatformOperationsHealth,
   getPlatformOverview,
   listPlatformAccessKeys,
   listPlatformAuditLogs,
@@ -19,6 +20,7 @@ import {
   type PlatformAiStudioOrganization,
   type PlatformAiStudioOrganizationUpdate,
   type PlatformAiStudioTelemetry,
+  type PlatformOperationsHealth,
   type PlatformOverview,
   type PlatformUser,
   type PlatformUserFilters,
@@ -82,6 +84,26 @@ function formatRate(part: number, total: number): string {
   return `${Math.round((part / total) * 100)}%`;
 }
 
+
+const operationsStatusLabels: Record<PlatformOperationsHealth["status"], string> = {
+  healthy: "Saudável",
+  warning: "Atenção",
+  critical: "Crítico",
+};
+
+const operationsAlarmLabels: Record<PlatformOperationsHealth["alarms"][number]["key"], string> = {
+  errors: "Erros do Estúdio IA",
+  throttles: "Throttling do Estúdio IA",
+  duration_p90: "Duração p90 do Estúdio IA",
+};
+
+const operationsAlarmStateLabels: Record<PlatformOperationsHealth["alarms"][number]["state"], string> = {
+  OK: "OK",
+  ALARM: "Alarme",
+  INSUFFICIENT_DATA: "Sem dados",
+  MISSING: "Não encontrado",
+};
+
 const telemetryLabels: Record<string, string> = {
   chromium: "Chromium", safari: "Safari", firefox: "Firefox", other: "Outro",
   desktop: "Desktop", mobile: "Mobile", tablet: "Tablet", unknown: "Desconhecido",
@@ -95,6 +117,8 @@ function aiStudioDraft(item: PlatformAiStudioOrganization): AiStudioDraft {
 
 export function PlatformAdminPage() {
   const [overview, setOverview] = useState<PlatformOverview | null>(null);
+  const [operationsHealth, setOperationsHealth] = useState<PlatformOperationsHealth | null>(null);
+  const [operationsLoading, setOperationsLoading] = useState(false);
   const [platformUsers, setPlatformUsers] = useState<PlatformUser[]>([]);
   const [auditLogs, setAuditLogs] = useState<PlatformAuditLog[]>([]);
   const [userFilters, setUserFilters] = useState<PlatformUserFilters>({ status: "all" });
@@ -120,8 +144,9 @@ export function PlatformAdminPage() {
     setLoading(true);
     setMessage(null);
 
-    const [overviewResult, usersResult, auditResult, accessKeysResult, aiStudioOrganizationsResult, telemetryResult] = await Promise.allSettled([
+    const [overviewResult, operationsResult, usersResult, auditResult, accessKeysResult, aiStudioOrganizationsResult, telemetryResult] = await Promise.allSettled([
       getPlatformOverview(),
+      getPlatformOperationsHealth(),
       listPlatformUsers(),
       listPlatformAuditLogs(),
       listPlatformAccessKeys(nextFilters),
@@ -137,6 +162,9 @@ export function PlatformAdminPage() {
 
     if (overviewResult.status === "fulfilled") setOverview(overviewResult.value);
     else { setOverview(null); failureMessage("Visão geral", overviewResult.reason); }
+
+    if (operationsResult.status === "fulfilled") setOperationsHealth(operationsResult.value);
+    else { setOperationsHealth(null); failureMessage("Saúde do sistema", operationsResult.reason); }
 
     if (usersResult.status === "fulfilled") setPlatformUsers(usersResult.value);
     else { setPlatformUsers([]); failureMessage("Usuários", usersResult.reason); }
@@ -194,6 +222,19 @@ export function PlatformAdminPage() {
       setMessage({ tone: "error", text: error instanceof AppApiError ? error.message : "Não foi possível carregar a auditoria da plataforma." });
     } finally {
       setAuditLoading(false);
+    }
+  }
+
+  async function handleOperationsRefresh() {
+    if (operationsLoading) return;
+    setOperationsLoading(true);
+    setMessage(null);
+    try {
+      setOperationsHealth(await getPlatformOperationsHealth());
+    } catch (error) {
+      setMessage({ tone: "error", text: error instanceof AppApiError ? error.message : "Não foi possível atualizar a saúde do sistema." });
+    } finally {
+      setOperationsLoading(false);
     }
   }
 
@@ -292,6 +333,32 @@ export function PlatformAdminPage() {
       <div className="platform-admin-metrics">
         {metricItems.map(([label, value]) => <article key={String(label)}><span>{label}</span><strong>{value}</strong></article>)}
       </div>
+
+      <article className="platform-admin-card platform-admin-operations" id="platform-operations">
+        <header>
+          <div><h2>Saúde do sistema</h2><p>Estado operacional da API, banco e guardrails CloudWatch já implantados para o Estúdio IA.</p></div>
+          <div className="platform-admin-operations__actions">
+            {operationsHealth && <span className={`platform-operations-overall is-${operationsHealth.status}`}>{operationsStatusLabels[operationsHealth.status]}</span>}
+            <button type="button" onClick={() => void handleOperationsRefresh()} disabled={operationsLoading}>{operationsLoading ? "Atualizando..." : "Atualizar"}</button>
+          </div>
+        </header>
+        {operationsLoading && !operationsHealth ? <div className="platform-admin-empty">Verificando operação...</div> : operationsHealth ? <>
+          <div className="platform-operations-components">
+            <section><span>API autenticada</span><strong>Saudável</strong><small>{operationsHealth.api.service} · v{operationsHealth.api.version}</small></section>
+            <section><span>Banco de dados</span><strong>Saudável</strong><small>Resposta em {operationsHealth.database.latencyMs} ms</small></section>
+            <section><span>CloudWatch</span><strong>{operationsHealth.monitoring.available ? "Disponível" : "Indisponível"}</strong><small>{operationsHealth.monitoring.message ?? `Região ${operationsHealth.region}`}</small></section>
+          </div>
+          <div className="platform-operations-alarms">
+            {operationsHealth.alarms.map((alarm) => <section key={alarm.key}>
+              <div><strong>{operationsAlarmLabels[alarm.key]}</strong><small>{alarm.name}</small></div>
+              <span className={`platform-operations-alarm is-${alarm.state.toLowerCase()}`}>{operationsAlarmStateLabels[alarm.state]}</span>
+              <small title={alarm.reason ?? undefined}>{alarm.updatedAt ? `Atualizado ${formatDate(alarm.updatedAt)}` : alarm.reason ?? "Sem atualização registrada"}</small>
+            </section>)}
+            {operationsHealth.monitoring.available && operationsHealth.alarms.length === 0 && <p className="platform-admin-muted">Nenhum alarme operacional foi retornado pelo CloudWatch.</p>}
+          </div>
+          <footer className="platform-operations-footer">Verificado em {formatDate(operationsHealth.checkedAt)} · {operationsHealth.region}</footer>
+        </> : <div className="platform-admin-empty">Saúde operacional indisponível.</div>}
+      </article>
 
       <article className="platform-admin-card" id="platform-users">
         <header><div><h2>Usuários da plataforma</h2><p>Visão global de contas, acesso administrativo e organizações ativas. Nenhum dado comercial dos tenants é carregado nesta listagem.</p></div></header>

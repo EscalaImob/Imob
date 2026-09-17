@@ -13,6 +13,27 @@ export interface PlatformOverview {
   activeAccessKeys: number;
 }
 
+
+export type PlatformOperationalAlarmState = "OK" | "ALARM" | "INSUFFICIENT_DATA" | "MISSING";
+
+export interface PlatformOperationalAlarm {
+  key: "errors" | "throttles" | "duration_p90";
+  name: string;
+  state: PlatformOperationalAlarmState;
+  reason: string | null;
+  updatedAt: string | null;
+}
+
+export interface PlatformOperationsHealth {
+  status: "healthy" | "warning" | "critical";
+  checkedAt: string;
+  region: string;
+  api: { status: "healthy"; service: string; version: string };
+  database: { status: "healthy"; latencyMs: number };
+  monitoring: { status: "healthy" | "warning"; available: boolean; message: string | null };
+  alarms: PlatformOperationalAlarm[];
+}
+
 export type PlatformUserStatus = "active" | "suspended" | "archived";
 
 export interface PlatformUser {
@@ -154,6 +175,10 @@ async function platformRequest<T>(path: string, init: RequestInit = {}): Promise
 
 export async function getPlatformOverview(): Promise<PlatformOverview> {
   return platformRequest("/platform/overview");
+}
+
+export async function getPlatformOperationsHealth(): Promise<PlatformOperationsHealth> {
+  return platformRequest("/platform/operations/health");
 }
 
 export async function listPlatformAccessKeys(filters: PlatformAccessKeyFilters = {}): Promise<PlatformAccessKey[]> {
