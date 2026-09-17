@@ -41,6 +41,43 @@ export async function listPlatformUsers(filters: PlatformUserFilters = {}): Prom
   return platformRequest(`/platform/users?${params.toString()}`);
 }
 
+
+export type PlatformAuditScope = "platform" | "organization";
+
+export interface PlatformAuditLog {
+  id: string;
+  scope: PlatformAuditScope;
+  organizationId: string | null;
+  organizationName: string | null;
+  actorUserId: string | null;
+  actorDisplayName: string | null;
+  actorEmail: string | null;
+  action: string;
+  entityType: string;
+  entityId: string;
+  requestId: string | null;
+  createdAt: string;
+}
+
+export interface PlatformAuditFilters {
+  q?: string;
+  scope?: PlatformAuditScope | "all";
+  organizationId?: string;
+  createdFrom?: string;
+  createdTo?: string;
+}
+
+export async function listPlatformAuditLogs(filters: PlatformAuditFilters = {}): Promise<PlatformAuditLog[]> {
+  const params = new URLSearchParams();
+  if (filters.q?.trim()) params.set("q", filters.q.trim());
+  if (filters.scope && filters.scope !== "all") params.set("scope", filters.scope);
+  if (filters.organizationId?.trim()) params.set("organizationId", filters.organizationId.trim());
+  if (filters.createdFrom) params.set("createdFrom", filters.createdFrom);
+  if (filters.createdTo) params.set("createdTo", filters.createdTo);
+  params.set("limit", "100");
+  return platformRequest(`/platform/audit-logs?${params.toString()}`);
+}
+
 export interface PlatformAccessKey {
   id: string;
   cpfMasked: string;

@@ -5,6 +5,7 @@ import {
   getPlatformAiStudioTelemetry,
   getPlatformOverview,
   listPlatformAccessKeys,
+  listPlatformAuditLogs,
   listPlatformAiStudioOrganizations,
   listPlatformUsers,
   revokePlatformAccessKey,
@@ -12,6 +13,9 @@ import {
   type PlatformAccessKey,
   type PlatformAccessKeyFilters,
   type PlatformAccessKeyStatus,
+  type PlatformAuditFilters,
+  type PlatformAuditLog,
+  type PlatformAuditScope,
   type PlatformAiStudioOrganization,
   type PlatformAiStudioOrganizationUpdate,
   type PlatformAiStudioTelemetry,
@@ -92,8 +96,11 @@ function aiStudioDraft(item: PlatformAiStudioOrganization): AiStudioDraft {
 export function PlatformAdminPage() {
   const [overview, setOverview] = useState<PlatformOverview | null>(null);
   const [platformUsers, setPlatformUsers] = useState<PlatformUser[]>([]);
+  const [auditLogs, setAuditLogs] = useState<PlatformAuditLog[]>([]);
   const [userFilters, setUserFilters] = useState<PlatformUserFilters>({ status: "all" });
   const [usersLoading, setUsersLoading] = useState(false);
+  const [auditFilters, setAuditFilters] = useState<PlatformAuditFilters>({ scope: "all" });
+  const [auditLoading, setAuditLoading] = useState(false);
   const [keys, setKeys] = useState<PlatformAccessKey[]>([]);
   const [aiOrganizations, setAiOrganizations] = useState<PlatformAiStudioOrganization[]>([]);
   const [aiDrafts, setAiDrafts] = useState<Record<string, AiStudioDraft>>({});
@@ -113,9 +120,10 @@ export function PlatformAdminPage() {
     setLoading(true);
     setMessage(null);
 
-    const [overviewResult, usersResult, accessKeysResult, aiStudioOrganizationsResult, telemetryResult] = await Promise.allSettled([
+    const [overviewResult, usersResult, auditResult, accessKeysResult, aiStudioOrganizationsResult, telemetryResult] = await Promise.allSettled([
       getPlatformOverview(),
       listPlatformUsers(),
+      listPlatformAuditLogs(),
       listPlatformAccessKeys(nextFilters),
       listPlatformAiStudioOrganizations(),
       getPlatformAiStudioTelemetry(telemetryDays),
@@ -132,6 +140,9 @@ export function PlatformAdminPage() {
 
     if (usersResult.status === "fulfilled") setPlatformUsers(usersResult.value);
     else { setPlatformUsers([]); failureMessage("Usuários", usersResult.reason); }
+
+    if (auditResult.status === "fulfilled") setAuditLogs(auditResult.value);
+    else { setAuditLogs([]); failureMessage("Auditoria", auditResult.reason); }
 
     if (accessKeysResult.status === "fulfilled") setKeys(accessKeysResult.value);
     else { setKeys([]); failureMessage("Chaves de acesso", accessKeysResult.reason); }
@@ -170,6 +181,19 @@ export function PlatformAdminPage() {
       setMessage({ tone: "error", text: error instanceof AppApiError ? error.message : "Não foi possível carregar os usuários da plataforma." });
     } finally {
       setUsersLoading(false);
+    }
+  }
+
+  async function handleAuditFilter() {
+    if (auditLoading) return;
+    setAuditLoading(true);
+    setMessage(null);
+    try {
+      setAuditLogs(await listPlatformAuditLogs(auditFilters));
+    } catch (error) {
+      setMessage({ tone: "error", text: error instanceof AppApiError ? error.message : "Não foi possível carregar a auditoria da plataforma." });
+    } finally {
+      setAuditLoading(false);
     }
   }
 
@@ -291,6 +315,36 @@ export function PlatformAdminPage() {
               </tr>)}
               {!loading && !usersLoading && platformUsers.length === 0 && <tr><td colSpan={5} className="platform-admin-empty">Nenhum usuário encontrado.</td></tr>}
               {(loading || usersLoading) && platformUsers.length === 0 && <tr><td colSpan={5} className="platform-admin-empty">Carregando usuários...</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article className="platform-admin-card" id="platform-audit">
+        <header><div><h2>Auditoria global</h2><p>Trilha metadata-only de operações da plataforma e dos tenants. Conteúdo comercial de before/after não é exposto neste console.</p></div></header>
+        <div className="platform-admin-filters platform-admin-audit-filters">
+          <input aria-label="Buscar auditoria" value={auditFilters.q ?? ""} onChange={(event) => setAuditFilters((current) => ({ ...current, q: event.target.value }))} placeholder="Ação, ator, recurso ou organização" />
+          <select aria-label="Escopo da auditoria" value={auditFilters.scope ?? "all"} onChange={(event) => setAuditFilters((current) => ({ ...current, scope: event.target.value as PlatformAuditScope | "all" }))}>
+            <option value="all">Todos os escopos</option><option value="platform">Plataforma</option><option value="organization">Organizações</option>
+          </select>
+          <input aria-label="Auditoria desde" type="date" value={auditFilters.createdFrom ?? ""} onChange={(event) => setAuditFilters((current) => ({ ...current, createdFrom: event.target.value }))} />
+          <input aria-label="Auditoria até" type="date" value={auditFilters.createdTo ?? ""} onChange={(event) => setAuditFilters((current) => ({ ...current, createdTo: event.target.value }))} />
+          <button type="button" onClick={() => void handleAuditFilter()} disabled={auditLoading}>{auditLoading ? "Buscando..." : "Filtrar"}</button>
+        </div>
+        <div className="platform-admin-table-wrap">
+          <table className="platform-admin-table platform-admin-audit-table">
+            <thead><tr><th>Quando</th><th>Escopo</th><th>Ator</th><th>Ação</th><th>Recurso</th><th>Request</th></tr></thead>
+            <tbody>
+              {auditLogs.map((item) => <tr key={item.id}>
+                <td>{formatDate(item.createdAt)}</td>
+                <td>{item.scope === "platform" ? <span className="platform-audit-scope is-platform">Plataforma</span> : <span className="platform-audit-scope">{item.organizationName ?? "Organização"}</span>}</td>
+                <td>{item.actorDisplayName || item.actorEmail ? <><strong>{item.actorDisplayName ?? "Usuário"}</strong><small>{item.actorEmail ?? ""}</small></> : <span className="platform-admin-muted">Sistema / automação</span>}</td>
+                <td><code>{item.action}</code></td>
+                <td><strong>{item.entityType}</strong><small>{item.entityId}</small></td>
+                <td><small>{item.requestId ?? "—"}</small></td>
+              </tr>)}
+              {!loading && !auditLoading && auditLogs.length === 0 && <tr><td colSpan={6} className="platform-admin-empty">Nenhum evento de auditoria encontrado.</td></tr>}
+              {(loading || auditLoading) && auditLogs.length === 0 && <tr><td colSpan={6} className="platform-admin-empty">Carregando auditoria...</td></tr>}
             </tbody>
           </table>
         </div>
