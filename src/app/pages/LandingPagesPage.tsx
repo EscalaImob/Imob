@@ -276,27 +276,38 @@ export function LandingPagesPage({ organizationId, canManage }: { organizationId
     if (!page) return;
     let previewPage = page;
     const featured = page.sections.find((section) => section.type === "featured-properties");
-    if (!localPreviewMode && featured && page.properties.length > 0) {
+    // A página de detalhes também pode ser aberta para qualquer imóvel do
+    // catálogo autorizado, não apenas para os imóveis destacados na home.
+    // Prepare os dois conjuntos para que o preview não mostre apenas o mapa
+    // (coordenadas públicas) sem gráfico e pontos próximos (insights).
+    const insightProperties = [...(page.catalogProperties || []), ...page.properties]
+      .filter((property, index, all) => all.findIndex((item) => item.id === property.id) === index);
+    if (!localPreviewMode && featured && insightProperties.length > 0) {
       const existing = readPropertyInsights(featured);
-      const missing = page.properties.filter((property) => {
-        if (property.siteAddressVisibility === "hidden" || !property.location?.trim()) return false;
+      const missing = insightProperties.filter((property) => {
+        const hasPublicPoint = Number.isFinite(property.publicLatitude) && Number.isFinite(property.publicLongitude);
+        if (property.siteAddressVisibility === "hidden" || (!property.location?.trim() && !hasPublicPoint)) return false;
         const insight = existing.find((item) => item.propertyId === property.id) || emptyPropertyInsight(property.id);
-        const automaticPoint = Number.isFinite(property.publicLatitude) && Number.isFinite(property.publicLongitude)
+        const automaticPoint = hasPublicPoint
           ? { mapLatitude: String(property.publicLatitude), mapLongitude: String(property.publicLongitude) } : {};
         return !mapEmbedUrl({ ...insight, ...automaticPoint }) || !insight.nearbySource || (!insight.valuationUpdatedAt && !insight.valuationUnavailableReason);
       });
       if (missing.length > 0) {
         setMessage("Preparando dados de valorização e proximidades...");
         const enriched = [...existing];
-        const results = await Promise.allSettled(missing.map((property) => refreshLandingPropertyInsights(organizationId, page.id, property.id)));
-        results.forEach((result, index) => {
-          if (result.status !== "fulfilled") return;
-          const propertyId = missing[index]!.id;
-          const current = enriched.find((item) => item.propertyId === propertyId) || emptyPropertyInsight(propertyId);
-          const existingIndex = enriched.findIndex((item) => item.propertyId === propertyId);
-          const next = { ...current, ...result.value, propertyId };
-          if (existingIndex >= 0) enriched[existingIndex] = next; else enriched.push(next);
-        });
+        // Limit concurrency so a large authorized catalog does not overwhelm
+        // the API or the Geoapify quota while the new tab is being prepared.
+        for (let index = 0; index < missing.length; index += 4) {
+          const results = await Promise.allSettled(missing.slice(index, index + 4).map((property) => refreshLandingPropertyInsights(organizationId, page.id, property.id)));
+          results.forEach((result, offset) => {
+            if (result.status !== "fulfilled") return;
+            const propertyId = missing[index + offset]!.id;
+            const current = enriched.find((item) => item.propertyId === propertyId) || emptyPropertyInsight(propertyId);
+            const existingIndex = enriched.findIndex((item) => item.propertyId === propertyId);
+            const next = { ...current, ...result.value, propertyId };
+            if (existingIndex >= 0) enriched[existingIndex] = next; else enriched.push(next);
+          });
+        }
         previewPage = { ...page, sections: page.sections.map((section) => section.id === featured.id ? { ...section, content: { ...section.content, propertyInsights: enriched } } : section) };
       }
     }
