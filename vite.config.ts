@@ -1,8 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { localPropertyInsightsPlugin } from "./dev/localPropertyInsightsPlugin.ts";
 
-export default defineConfig({
-  plugins: [react()],
+export default defineConfig(({ mode }) => ({
+  plugins: [react(), localPropertyInsightsPlugin(mode)],
   build: {
     rollupOptions: {
       input: {
@@ -41,4 +42,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

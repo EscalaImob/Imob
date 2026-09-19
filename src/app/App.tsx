@@ -197,7 +197,7 @@ const navigation: NavGroup[] = [
         permission: "portfolio.publications.read",
       },
       {
-        label: "Landing Pages",
+        label: "Meu Site",
         path: "/app/landing-pages/",
         icon: GlobeIcon,
         permission: "portfolio.landing_pages.read",
@@ -372,8 +372,8 @@ function currentPage(): {
     return {
       key: "landingPages",
       group: "Portfólio",
-      label: "Landing Pages",
-      title: "Landing Pages",
+      label: "Meu Site",
+      title: "Meu Site",
     };
   if (path === "/app/autorizacao/")
     return {
@@ -2250,7 +2250,7 @@ export function App() {
             canReadLandingPages ? (
               <LandingPagesPage organizationId={activeOrganization.id} canManage={canManageLandingPages} />
             ) : (
-              <ModuleAccessDenied title="Landing Pages" />
+              <ModuleAccessDenied title="Meu Site" />
             )
           ) : page.key === "publications" ? (
             canReadPublications ? (
