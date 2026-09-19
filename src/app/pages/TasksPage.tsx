@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppApiError } from "../../services/appApi";
 import { listTasks, updateTask, type TaskListItem, type TaskPriority, type TaskStatus, type TaskView } from "../../services/productivityApi";
 import { TasksIcon } from "../icons";
@@ -33,27 +33,60 @@ export function TasksPage({ organizationId, canCreate, canUpdate }: { organizati
   const [page, setPage] = useState(1);
   const [modalTask, setModalTask] = useState<TaskListItem | null | undefined>(undefined);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const movingTaskIds = useRef(new Set<string>());
+  const loadVersion = useRef(0);
 
   const load = useCallback(async () => {
+    const version = ++loadVersion.current;
     setLoading(true); setError(null);
-    try { setResult(await listTasks(organizationId, { search, priority: priority || undefined, view, page, pageSize: 50 })); }
-    catch (loadError) { setError(loadError instanceof AppApiError ? loadError.message : "Não foi possível carregar as tarefas."); }
-    finally { setLoading(false); }
+    try {
+      const next = await listTasks(organizationId, { search, priority: priority || undefined, view, page, pageSize: 50 });
+      if (version === loadVersion.current) setResult(next);
+    } catch (loadError) {
+      if (version === loadVersion.current) setError(loadError instanceof AppApiError ? loadError.message : "Não foi possível carregar as tarefas.");
+    } finally {
+      if (version === loadVersion.current) setLoading(false);
+    }
   }, [organizationId, search, priority, view, page]);
 
-  useEffect(() => { const timer = globalThis.setTimeout(() => void load(), 250); return () => globalThis.clearTimeout(timer); }, [load]);
+  useEffect(() => {
+    const timer = globalThis.setTimeout(() => void load(), 250);
+    return () => { globalThis.clearTimeout(timer); loadVersion.current += 1; };
+  }, [load]);
   const grouped = useMemo(() => Object.fromEntries(statuses.map((status) => [status.code, (result?.items ?? []).filter((task) => task.status === status.code)])) as Record<TaskStatus, TaskListItem[]>, [result?.items]);
 
   async function moveTask(taskId: string, status: TaskStatus) {
-    if (!canUpdate) return;
+    if (!canUpdate || movingTaskIds.current.has(taskId)) return;
     const task = result?.items.find((item) => item.id === taskId);
     if (!task || task.status === status) return;
     const input = taskInput(task, status);
     if (!input) { setError("Defina um prazo para a tarefa antes de alterar seu status."); return; }
+    movingTaskIds.current.add(taskId);
+    // A list response started before this drop must never put the card back.
+    const moveVersion = ++loadVersion.current;
+    setLoading(false);
     setError(null);
-    try { await updateTask(organizationId, task.id, input); await load(); }
-    catch (moveError) { setError(moveError instanceof AppApiError ? moveError.message : "Não foi possível mover a tarefa."); }
-    finally { setDraggingId(null); }
+    setResult((current) => current ? { ...current, items: current.items.map((item) => item.id === taskId ? { ...item, status } : item) } : current);
+    setDraggingId(null);
+    try {
+      const saved = await updateTask(organizationId, task.id, input);
+      setResult((current) => current ? { ...current, items: current.items.map((item) => item.id === taskId ? saved : item) } : current);
+      movingTaskIds.current.delete(taskId);
+      if (movingTaskIds.current.size === 0 && moveVersion === loadVersion.current) {
+        // Refresh only the counters; replacing the board causes a visible reload
+        // and can reintroduce stale card positions from an older list response.
+        void listTasks(organizationId, { search, priority: priority || undefined, view, page, pageSize: 50 })
+          .then((fresh) => {
+            if (moveVersion === loadVersion.current && movingTaskIds.current.size === 0) {
+              setResult((current) => current ? { ...current, summary: fresh.summary } : current);
+            }
+          })
+          .catch(() => { /* The saved card remains authoritative if counter refresh fails. */ });
+      }
+    } catch (moveError) {
+      setResult((current) => current ? { ...current, items: current.items.map((item) => item.id === taskId ? task : item) } : current);
+      setError(moveError instanceof AppApiError ? moveError.message : "Não foi possível mover a tarefa.");
+    } finally { movingTaskIds.current.delete(taskId); }
   }
 
   return (

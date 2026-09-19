@@ -7,12 +7,15 @@ export class AuthApiError extends Error {
 }
 function apiBase(): string { const value=import.meta.env.VITE_API_URL?.trim(); if(!value) throw new AuthApiError("A autenticação ainda não está disponível.","API_NOT_CONFIGURED"); return value.replace(/\/+$/u,""); }
 async function request<T>(path:string,payload:unknown,defaultError:string):Promise<T>{
-  const controller=new AbortController(); const timeout=globalThis.setTimeout(()=>controller.abort(),REQUEST_TIMEOUT_MS);
-  try { const response=await fetch(`${apiBase()}${path}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload),signal:controller.signal}); let body:any=null; try{body=await response.json();}catch{body=null;}
+  // Login may include a Lambda cold start, Cognito and database lookups. Do not
+  // abort a valid authentication while the server is still processing it.
+  const controller=path==="/auth/login"?null:new AbortController();
+  const timeout=controller?globalThis.setTimeout(()=>controller.abort(),REQUEST_TIMEOUT_MS):null;
+  try { const response=await fetch(`${apiBase()}${path}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload),...(controller?{signal:controller.signal}:{})}); let body:any=null; try{body=await response.json();}catch{body=null;}
     if(!response.ok) throw new AuthApiError(body?.error?.message||defaultError,body?.error?.code||"API_ERROR",response.status,Array.isArray(body?.error?.issues)?body.error.issues:[]);
     if(body?.success!==true) throw new AuthApiError(defaultError,"INVALID_API_RESPONSE",response.status); return body.data as T;
-  } catch(error){ if(error instanceof AuthApiError) throw error; if(error instanceof DOMException&&error.name==="AbortError") throw new AuthApiError("A solicitação demorou mais que o esperado. Tente novamente.","REQUEST_TIMEOUT"); throw new AuthApiError("Não foi possível conectar ao servidor.","NETWORK_ERROR"); }
-  finally{globalThis.clearTimeout(timeout);}
+  } catch(error){ if(error instanceof AuthApiError) throw error; if(error instanceof DOMException&&error.name==="AbortError"&&controller?.signal.aborted) throw new AuthApiError("A solicitação demorou mais que o esperado. Tente novamente.","REQUEST_TIMEOUT"); throw new AuthApiError("Não foi possível conectar ao servidor.","NETWORK_ERROR"); }
+  finally{if(timeout!==null)globalThis.clearTimeout(timeout);}
 }
 function validSession(value:unknown,requireRefresh:boolean):value is AuthSessionPayload { if(typeof value!=="object"||value===null)return false; const session=value as Partial<AuthSessionPayload>; return Boolean(typeof session.accessToken==="string"&&session.accessToken&&typeof session.idToken==="string"&&session.idToken&&typeof session.expiresIn==="number"&&Number.isFinite(session.expiresIn)&&session.expiresIn>0&&typeof session.tokenType==="string"&&session.tokenType&&(!requireRefresh||(typeof session.refreshToken==="string"&&session.refreshToken))); }
 function validLoginResult(value:unknown):value is LoginResult { if(typeof value!=="object"||value===null)return false; const result=value as Partial<LoginResult>; return Boolean(result.user&&typeof result.user.id==="string"&&typeof result.user.email==="string"&&typeof result.user.displayName==="string"&&typeof result.user.platformAccess==="boolean"&&result.onboarding&&typeof result.onboarding.step==="number"&&typeof result.onboarding.completed==="boolean"&&typeof result.onboarding.next==="string"&&validSession(result.session,true)); }

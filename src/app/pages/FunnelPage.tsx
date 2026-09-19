@@ -264,10 +264,12 @@ export function FunnelPage({ organizationId, funnelCode, canCreate, canUpdate }:
   const [view, setView] = useState<"all" | "mine">("all");
   const [createOpen, setCreateOpen] = useState(false);
   const [draggedCard, setDraggedCard] = useState<OpportunityCard | null>(null);
+  const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
   const [dragTargetStageId, setDragTargetStageId] = useState<string | null>(null);
   const [transition, setTransition] = useState<TransitionState>(null);
   const [transitionError, setTransitionError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
+  const movingRef = useRef(false);
   const [editingCard,setEditingCard]=useState<OpportunityCard|null>(null);
 
   const defaultTitle = funnelCode === "buyers" ? "Funil de compradores" : "Funil de captação";
@@ -305,6 +307,7 @@ export function FunnelPage({ organizationId, funnelCode, canCreate, canUpdate }:
 
   function cancelPointerDrag() {
     setDraggedCard(null);
+    setDragPosition(null);
     setDragTargetStageId(null);
   }
 
@@ -317,10 +320,22 @@ export function FunnelPage({ organizationId, funnelCode, canCreate, canUpdate }:
   }
 
   async function executeMove(state: NonNullable<TransitionState>, lossReasonId = "") {
-    if (moving) return;
+    if (movingRef.current) return;
+    movingRef.current = true;
+    const previousBoard = board;
+    const optimistic = !terminalOutcome(state.stage) && state.card.status === "open" && state.stage.requiredFields.length === 0;
     setMoving(true);
     setError(null);
     setTransitionError(null);
+    if (optimistic) setBoard((current) => current ? {
+      ...current,
+      funnel: { ...current.funnel, stages: current.funnel.stages.map((stage) => ({
+        ...stage,
+        opportunities: stage.id === state.stage.id
+          ? [...stage.opportunities.filter((card) => card.id !== state.card.id), { ...state.card, probability: stage.probability }]
+          : stage.opportunities.filter((card) => card.id !== state.card.id),
+      })) },
+    } : current);
     try {
       const moved = await moveOpportunityStage(organizationId, state.card.id, state.stage.id, lossReasonId || undefined);
       setBoard((current) => current ? {
@@ -338,10 +353,12 @@ export function FunnelPage({ organizationId, funnelCode, canCreate, canUpdate }:
       setTransition(null);
       cancelPointerDrag();
     } catch (moveError) {
+      if (optimistic) setBoard(previousBoard);
       const message = moveError instanceof AppApiError ? moveError.message : "Não foi possível mover a oportunidade.";
       setTransitionError(message);
       cancelPointerDrag();
     } finally {
+      movingRef.current = false;
       setMoving(false);
     }
   }
@@ -390,7 +407,7 @@ export function FunnelPage({ organizationId, funnelCode, canCreate, canUpdate }:
               >
                 <header style={{ borderTopColor: stage.color }}><div><strong>{stage.name}</strong><span>{stage.probability ?? 0}%</span></div><b>{stage.opportunities.length}</b></header>
                 <div className="app-kanban-column__body">
-                  {stage.opportunities.map((card) => <OpportunityCardView key={card.id} card={card} canUpdate={canUpdate} isDragging={draggedCard?.id === card.id} onPointerDragStart={(selected, clientX, clientY) => { setDraggedCard(selected); setDragTargetStageId(stageIdAtPoint(clientX, clientY)); }} onPointerDragMove={(clientX, clientY) => setDragTargetStageId(stageIdAtPoint(clientX, clientY))} onPointerDragEnd={finishPointerDrag} onPointerDragCancel={cancelPointerDrag} onOpen={(selected) => { if (canUpdate) setEditingCard(selected); }} />)}
+                  {stage.opportunities.map((card) => <OpportunityCardView key={card.id} card={card} canUpdate={canUpdate} isDragging={draggedCard?.id === card.id} onPointerDragStart={(selected, clientX, clientY) => { setDraggedCard(selected); setDragPosition({ x: clientX, y: clientY }); setDragTargetStageId(stageIdAtPoint(clientX, clientY)); }} onPointerDragMove={(clientX, clientY) => { setDragPosition({ x: clientX, y: clientY }); setDragTargetStageId(stageIdAtPoint(clientX, clientY)); }} onPointerDragEnd={finishPointerDrag} onPointerDragCancel={cancelPointerDrag} onOpen={(selected) => { if (canUpdate) setEditingCard(selected); }} />)}
                   {stage.opportunities.length === 0 && <div className="app-kanban-empty">Nenhuma oportunidade</div>}
                 </div>
               </section>
@@ -398,6 +415,8 @@ export function FunnelPage({ organizationId, funnelCode, canCreate, canUpdate }:
           </div>
         </section>
       )}
+
+      {draggedCard && dragPosition && <div className="app-opportunity-drag-preview" style={{ left: dragPosition.x, top: dragPosition.y }} aria-hidden="true"><strong>{draggedCard.title}</strong><span>{draggedCard.contact.name}</span><b>{currency(draggedCard.estimatedValue)}</b></div>}
 
       {createOpen && <OpportunityModal organizationId={organizationId} funnelCode={funnelCode} onClose={() => setCreateOpen(false)} onCreated={() => { setCreateOpen(false); void load(); }} />}
       {editingCard && <OpportunityEditModal organizationId={organizationId} card={editingCard} onClose={() => setEditingCard(null)} onSaved={(updated) => {

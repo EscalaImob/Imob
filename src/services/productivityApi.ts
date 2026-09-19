@@ -9,11 +9,11 @@ function apiBase(): string {
   return value.replace(/\/+$/u, "");
 }
 
-async function tenantRequest<T>(organizationId: string, path: string, init: RequestInit = {}): Promise<T> {
+async function tenantRequest<T>(organizationId: string, path: string, init: RequestInit = {}, timeoutMs: number | null = REQUEST_TIMEOUT_MS): Promise<T> {
   const session = await ensureValidAuthSession();
   if (!session) throw new AppApiError("Sua sessão expirou. Entre novamente.", "UNAUTHORIZED", 401);
-  const controller = new AbortController();
-  const timeout = globalThis.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const controller = timeoutMs === null ? null : new AbortController();
+  const timeout = controller ? globalThis.setTimeout(() => controller.abort(), timeoutMs ?? REQUEST_TIMEOUT_MS) : null;
   try {
     const response = await fetch(`${apiBase()}${path}`, {
       ...init,
@@ -23,7 +23,7 @@ async function tenantRequest<T>(organizationId: string, path: string, init: Requ
         ...(init.body ? { "content-type": "application/json" } : {}),
         ...(init.headers ?? {}),
       },
-      signal: controller.signal,
+      ...(controller ? { signal: controller.signal } : {}),
     });
     let payload: unknown = null;
     try { payload = await response.json(); } catch { payload = null; }
@@ -33,9 +33,9 @@ async function tenantRequest<T>(organizationId: string, path: string, init: Requ
     return body.data;
   } catch (error) {
     if (error instanceof AppApiError) throw error;
-    if (error instanceof DOMException && error.name === "AbortError") throw new AppApiError("A plataforma demorou mais que o esperado para responder.", "REQUEST_TIMEOUT");
+    if (error instanceof DOMException && error.name === "AbortError" && controller?.signal.aborted) throw new AppApiError("A plataforma demorou mais que o esperado para responder.", "REQUEST_TIMEOUT");
     throw new AppApiError("Não foi possível conectar à plataforma. Verifique sua conexão e tente novamente.", "NETWORK_ERROR");
-  } finally { globalThis.clearTimeout(timeout); }
+  } finally { if (timeout !== null) globalThis.clearTimeout(timeout); }
 }
 
 export type TaskStatus = "todo" | "in_progress" | "waiting" | "completed" | "canceled";
@@ -91,7 +91,9 @@ export async function createTask(organizationId: string, input: TaskInput): Prom
   return tenantRequest<TaskListItem>(organizationId, "/productivity/tasks", { method: "POST", body: JSON.stringify(input) });
 }
 export async function updateTask(organizationId: string, taskId: string, input: TaskInput): Promise<TaskListItem> {
-  return tenantRequest<TaskListItem>(organizationId, `/productivity/tasks/${encodeURIComponent(taskId)}`, { method: "PATCH", body: JSON.stringify(input) });
+  // A client abort does not roll back a PATCH already being processed by the API.
+  // Wait for the authoritative result so the board cannot revert a committed move.
+  return tenantRequest<TaskListItem>(organizationId, `/productivity/tasks/${encodeURIComponent(taskId)}`, { method: "PATCH", body: JSON.stringify(input) }, null);
 }
 export async function listAgenda(organizationId: string, from: Date, to: Date): Promise<{ items: AgendaItem[] }> {
   const query = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() });
