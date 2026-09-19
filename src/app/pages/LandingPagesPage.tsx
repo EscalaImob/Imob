@@ -272,7 +272,39 @@ export function LandingPagesPage({ organizationId, canManage }: { organizationId
   }
   async function publish() { if (!page) return; if (localPreviewMode) { const status = page.status === "published" ? "draft" : "published"; setPage({ ...page, status, publishedAt: status === "published" ? new Date().toISOString() : null }); setMessage(status === "published" ? "Publicação simulada localmente" : "Prévia voltou para rascunho"); return; } setBusy(true); try { const value = await setLandingPageStatus(organizationId, page.id, page.status === "published" ? "unpublished" : "published"); setPage(value); setMessage(value.status === "published" ? "Página publicada" : "Página despublicada"); } catch (cause) { setError(cause instanceof AppApiError ? cause.message : "Não foi possível alterar a publicação."); } finally { setBusy(false); } }
   async function copy() { if (!page) return; await navigator.clipboard.writeText(publicUrl(page.slug)); setMessage("Link copiado"); }
-  function openPreview() { if (!page) return; const key = crypto.randomUUID(); localStorage.setItem(`imob:landing-preview:${key}`, JSON.stringify({ createdAt: Date.now(), page })); const previewWindow = window.open(`/imob/preview/?previewKey=${encodeURIComponent(key)}`, "_blank"); if (previewWindow) previewWindow.opener = null; else setError("O navegador bloqueou a nova guia. Libere pop-ups para visualizar a landing page."); }
+  async function openPreview() {
+    if (!page) return;
+    let previewPage = page;
+    const featured = page.sections.find((section) => section.type === "featured-properties");
+    if (!localPreviewMode && featured && page.properties.length > 0) {
+      const existing = readPropertyInsights(featured);
+      const missing = page.properties.filter((property) => {
+        if (property.siteAddressVisibility === "hidden" || !property.location?.trim()) return false;
+        const insight = existing.find((item) => item.propertyId === property.id) || emptyPropertyInsight(property.id);
+        const automaticPoint = Number.isFinite(property.publicLatitude) && Number.isFinite(property.publicLongitude)
+          ? { mapLatitude: String(property.publicLatitude), mapLongitude: String(property.publicLongitude) } : {};
+        return !mapEmbedUrl({ ...insight, ...automaticPoint }) || !insight.nearbySource || (!insight.valuationUpdatedAt && !insight.valuationUnavailableReason);
+      });
+      if (missing.length > 0) {
+        setMessage("Preparando dados de valorização e proximidades...");
+        const enriched = [...existing];
+        const results = await Promise.allSettled(missing.map((property) => refreshLandingPropertyInsights(organizationId, page.id, property.id)));
+        results.forEach((result, index) => {
+          if (result.status !== "fulfilled") return;
+          const propertyId = missing[index]!.id;
+          const current = enriched.find((item) => item.propertyId === propertyId) || emptyPropertyInsight(propertyId);
+          const existingIndex = enriched.findIndex((item) => item.propertyId === propertyId);
+          const next = { ...current, ...result.value, propertyId };
+          if (existingIndex >= 0) enriched[existingIndex] = next; else enriched.push(next);
+        });
+        previewPage = { ...page, sections: page.sections.map((section) => section.id === featured.id ? { ...section, content: { ...section.content, propertyInsights: enriched } } : section) };
+      }
+    }
+    const key = crypto.randomUUID();
+    localStorage.setItem(`imob:landing-preview:${key}`, JSON.stringify({ createdAt: Date.now(), page: previewPage }));
+    const previewWindow = window.open(`/imob/preview/?previewKey=${encodeURIComponent(key)}`, "_blank");
+    if (previewWindow) previewWindow.opener = null; else setError("O navegador bloqueou a nova guia. Libere pop-ups para visualizar a landing page.");
+  }
   async function toggleCatalogProperty(item:PropertyListItem){if(!page)return;if(page.properties.some(property=>property.id===item.id)){setPage({...page,properties:page.properties.filter(property=>property.id!==item.id)});return;}if(page.properties.length>=9){setError("Você pode destacar no máximo 9 imóveis.");return;}setBusy(true);setError("");try{const [detail,images]=await Promise.all([getProperty(organizationId,item.id),listPropertyImages(organizationId,item.id)]);const primary=images.find(image=>image.primary)||images[0];setPage(current=>current?{...current,properties:[...current.properties,{id:detail.id,title:detail.siteTitle||detail.title,description:detail.siteDescription,location:detail.siteLocationText||detail.publicLocation,type:detail.type,purpose:detail.purpose,salePrice:detail.salePrice,rentPrice:detail.rentPrice,totalArea:detail.totalArea,usefulArea:detail.usefulArea,landArea:detail.landArea,builtArea:detail.builtArea,areaUnit:detail.areaUnit,bedrooms:detail.bedrooms,suites:detail.suites,bathrooms:detail.bathrooms,parkingSpaces:detail.parkingSpaces,amenities:detail.amenities,condominiumAmenities:detail.condominiumAmenities,viewCount:0,imageUrl:primary?.viewUrl||null,imageUrls:images.map(image=>image.viewUrl),...previewPublicMapPoint(detail.siteAddressVisibility,detail.latitude,detail.longitude),siteAddressVisibility:detail.siteAddressVisibility}]}:current);}catch(cause){setError(cause instanceof AppApiError?cause.message:"Não foi possível carregar o imóvel selecionado.");}finally{setBusy(false);}}
 
   const selected = useMemo(() => page?.sections.find((section) => section.id === selectedId) || null, [page, selectedId]);
