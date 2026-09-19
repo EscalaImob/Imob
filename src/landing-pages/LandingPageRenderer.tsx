@@ -26,7 +26,7 @@ export function LandingPageRenderer({page,preview=false,onSubmit,onPropertyView,
  useEffect(()=>{if(preview)return;document.title=selectedProperty?`${selectedProperty.title} | ${page.identity.name}`:page.seo.title||page.name;},[selectedProperty,preview,page.identity.name,page.seo.title,page.name]);
  const landingPath=`/imob/${encodeURIComponent(page.slug)}`;
  const publicPreviewKey=preview&&location.pathname.startsWith("/imob/preview")?new URLSearchParams(location.search).get("previewKey"):null;
- const catalogPath=publicPreviewKey?`/imob/preview/imoveis?previewKey=${encodeURIComponent(publicPreviewKey)}`:`${landingPath}/imoveis`;
+ const catalogPath=publicPreviewKey?`/imob/preview/?previewKey=${encodeURIComponent(publicPreviewKey)}&view=imoveis`:`${landingPath}/imoveis`;
  const canOpenCatalog=Boolean(!preview||publicPreviewKey);
  const openProperty=(property:LandingProperty)=>{setSelectedPropertyId(property.id);if(!preview)history.pushState(null,"",`${landingPath}?imovel=${encodeURIComponent(property.id)}`);window.scrollTo(0,0);void onPropertyView?.(property.id);};
  const closeProperty=()=>{setSelectedPropertyId(null);if(!preview)history.pushState(null,"",`${landingPath}#imoveis`);window.scrollTo(0,0);};
