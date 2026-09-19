@@ -42,7 +42,11 @@ export function PublicLandingApp() {
   const [route, setRoute] = useState(() => `${location.pathname}${location.search}`);
   const path = route.split("?")[0].replace(/\/+$/u, "");
   const slug = decodeURIComponent(path.split("/")[2] || "");
-  const catalog = path.endsWith("/imoveis");
+  const routeParams = new URLSearchParams(route.split("?")[1] || "");
+  // GitHub Pages and other static hosts do not rewrite /imoveis to the
+  // preview index.html. Keep the preview on the real file path and encode the
+  // view in the query string so opening the catalog never returns a server 404.
+  const catalog = path.endsWith("/imoveis") || (preview && routeParams.get("view") === "imoveis");
   const previewKey = preview ? new URLSearchParams(route.split("?")[1] || "").get("previewKey") : null;
   const propertyId = new URLSearchParams(route.split("?")[1] || "").get("imovel");
   const favoritesOnly = new URLSearchParams(route.split("?")[1] || "").get("favoritos") === "1";
@@ -113,7 +117,7 @@ export function PublicLandingApp() {
     window.scrollTo(0, 0);
   };
   const catalogPath = preview
-    ? `/imob/preview/imoveis${previewKey ? `?previewKey=${encodeURIComponent(previewKey)}` : ""}`
+    ? `/imob/preview/${previewKey ? `?previewKey=${encodeURIComponent(previewKey)}&view=imoveis` : "?view=imoveis"}`
     : `/imob/${encodeURIComponent(slug)}/imoveis`;
   const landingPath = preview
     ? `/imob/preview/${previewKey ? `?previewKey=${encodeURIComponent(previewKey)}` : ""}`
