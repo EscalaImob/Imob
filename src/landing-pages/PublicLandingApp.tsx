@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import escalaImobFaviconUrl from "../assets/brand/escala-imob-icon-original.svg";
 import { getPublicLandingCatalog, getPublicLandingPage, getPublicLandingPropertyInsights, refreshLocalPreviewPropertyInsights, submitPublicLandingLead, trackPublicLandingPropertyView } from "../services/landingPagesApi";
 import type { LandingPageDocument, LandingProperty } from "./model";
 import { emptyPropertyInsight, readPropertyInsights, type PropertyInsight } from "./propertyInsights";
@@ -38,6 +39,16 @@ function writeFavoriteIds(key: string, ids: string[]): void {
 }
 
 export function PublicLandingApp() {
+  useEffect(() => {
+    let favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (!favicon) {
+      favicon = document.createElement("link");
+      favicon.rel = "icon";
+      document.head.appendChild(favicon);
+    }
+    favicon.type = "image/svg+xml";
+    favicon.href = escalaImobFaviconUrl;
+  }, []);
   const preview = location.pathname.startsWith("/imob/preview");
   const [route, setRoute] = useState(() => `${location.pathname}${location.search}`);
   const path = route.split("?")[0].replace(/\/+$/u, "");
