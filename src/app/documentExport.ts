@@ -20,6 +20,17 @@ function finalizedDocumentHtml(title: string, sections: ExportSection[], brand: 
     .replace("<img src=", '<img width="112" height="48" style="width:112px;height:48px;max-width:112px;max-height:48px;object-fit:contain" src=');
 }
 
+
+export function previewDocument(title: string, sections: ExportSection[], brand: DocumentBrand) {
+  const popup = globalThis.open("", "_blank");
+  if (!popup) return false;
+  popup.document.open();
+  popup.document.write(finalizedDocumentHtml(title, sections, brand));
+  popup.document.close();
+  popup.document.title = title;
+  return true;
+}
+
 export function downloadDoc(title: string, filename: string, sections: ExportSection[], brand: DocumentBrand) {
   const blob = new Blob([finalizedDocumentHtml(title, sections, brand)], { type: "application/msword;charset=utf-8" });
   const url = URL.createObjectURL(blob); const anchor = document.createElement("a");
