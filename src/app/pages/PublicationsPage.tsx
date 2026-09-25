@@ -19,7 +19,9 @@ import {
   type PublicationOptions,
   type PublicationPropertyOption,
 } from "../../services/publicationsApi";
+import { getProperty, listPropertyImages } from "../../services/propertiesApi";
 import { SearchIcon, ShareIcon } from "../icons";
+import { generateInstagramOpportunityArtwork } from "../instagramPublicationArtwork";
 interface Props {
   organizationId: string;
   canCreate: boolean;
@@ -151,9 +153,22 @@ function PublicationModal({
   const [reelAssets, setReelAssets] = useState<AiStudioReelAsset[]>([]);
   const [reelAssetsLoading, setReelAssetsLoading] = useState(false);
   const [reelAssetsError, setReelAssetsError] = useState<string | null>(null);
+  const [artwork, setArtwork] = useState<{ url: string; fileName: string } | null>(null);
+  const [artworkLoading, setArtworkLoading] = useState(false);
+  const [artworkError, setArtworkError] = useState<string | null>(null);
   const property =
     options.properties.find((candidate) => candidate.id === draft.propertyId) ??
     null;
+  useEffect(() => {
+    setArtwork(null);
+    setArtworkError(null);
+  }, [draft.propertyId, draft.objective, draft.channel, draft.format]);
+  useEffect(() => {
+    const url = artwork?.url;
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [artwork?.url]);
   useEffect(() => {
     if (draft.format !== "reel" || !draft.propertyId) {
       setReelAssets([]);
@@ -218,6 +233,35 @@ function PublicationModal({
       format,
       mediaAssetId: format === "reel" ? current.mediaAssetId : null,
     }));
+  }
+  async function generateArtwork() {
+    if (!draft.propertyId) return;
+    setArtworkLoading(true);
+    setArtworkError(null);
+    try {
+      const [detail, images] = await Promise.all([
+        getProperty(organizationId, draft.propertyId),
+        listPropertyImages(organizationId, draft.propertyId),
+      ]);
+      const blob = await generateInstagramOpportunityArtwork({
+        property: detail,
+        images,
+        objective: draft.objective,
+      });
+      const safeCode = detail.internalCode.replace(/[^a-zA-Z0-9_-]+/gu, "-").replace(/^-+|-+$/gu, "") || "imovel";
+      setArtwork({
+        url: URL.createObjectURL(blob),
+        fileName: `instagram-oportunidade-${safeCode}.png`,
+      });
+    } catch (artworkCause) {
+      setArtworkError(
+        artworkCause instanceof AppApiError || artworkCause instanceof Error
+          ? artworkCause.message
+          : "Não foi possível gerar a arte para Instagram.",
+      );
+    } finally {
+      setArtworkLoading(false);
+    }
   }
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -356,6 +400,35 @@ function PublicationModal({
                 ))}
               </select>
             </label>
+            {property && draft.channel === "instagram" && draft.format === "feed" && (
+              <div className="app-publication-instagram-template is-wide">
+                <div className="app-publication-instagram-template__header">
+                  <div>
+                    <strong>Template Oportunidade · Instagram 4:5</strong>
+                    <span>Gera um PNG 1080 × 1350 com a foto principal, preço, localização e atributos do imóvel.</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="app-secondary-button"
+                    disabled={artworkLoading}
+                    onClick={() => void generateArtwork()}
+                  >
+                    {artworkLoading ? "Gerando..." : artwork ? "Gerar novamente" : "Gerar arte"}
+                  </button>
+                </div>
+                {artworkError && <div className="app-inline-error">{artworkError}</div>}
+                {artwork && (
+                  <div className="app-publication-instagram-template__preview">
+                    <img src={artwork.url} alt="Prévia da arte Oportunidade para Instagram" />
+                    <div>
+                      <strong>Arte pronta para publicação</strong>
+                      <span>O arquivo é gerado localmente a partir dos dados atuais do imóvel e não altera a foto original.</span>
+                      <a className="app-primary-button" href={artwork.url} download={artwork.fileName}>Baixar PNG</a>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             {draft.format === "reel" && (
               <div className="app-publication-reel-picker is-wide">
                 <div className="app-publication-reel-picker__header">
