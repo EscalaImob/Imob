@@ -1269,10 +1269,10 @@ export function SettingsPage({
 
     try {
       const updated = await updateOrganizationMemberStatus(organizationId, member.membershipId, status);
-      setMembers((current) => current.map((item) => item.membershipId === updated.membershipId ? updated : item));
+      setMembers((current) => current.map((item) => item.membershipId === updated.membershipId ? { ...updated, avatarUrl: updated.avatarUrl ?? item.avatarUrl ?? null } : item));
       setTeams((current) => current.map((team) => ({
         ...team,
-        members: team.members.map((item) => item.membershipId === updated.membershipId ? updated : item),
+        members: team.members.map((item) => item.membershipId === updated.membershipId ? { ...updated, avatarUrl: updated.avatarUrl ?? item.avatarUrl ?? null } : item),
       })));
       setSuccess(`Status de ${updated.displayName} atualizado.`);
       await onUpdated();
@@ -2040,7 +2040,7 @@ export function SettingsPage({
                 const accessBusy = memberAccessBusyId === member.membershipId;
                 const canResetAccess = canUpdateUsers && member.membershipStatus === "active" && member.userStatus === "active";
                 return <article key={member.membershipId} className="app-settings-member-row">
-                  <div className="app-settings-member-avatar" aria-hidden="true">{isCurrent&&(profilePhotoPreview||currentUser.avatarUrl)?<img src={profilePhotoPreview??currentUser.avatarUrl??""} alt=""/>:initials(member.displayName)}</div>
+                  <div className="app-settings-member-avatar" aria-hidden="true">{(isCurrent ? (profilePhotoPreview ?? currentUser.avatarUrl ?? member.avatarUrl) : member.avatarUrl) ? <img src={(isCurrent ? (profilePhotoPreview ?? currentUser.avatarUrl ?? member.avatarUrl) : member.avatarUrl) ?? ""} alt=""/> : initials(member.displayName)}</div>
                   <div className="app-settings-member-identification"><strong>{member.displayName}{isCurrent && <em>Você</em>}</strong><span>{member.email}</span></div>
                   <span className={`app-settings-member-status is-${member.membershipStatus}`}>{membershipStatusLabel(member.membershipStatus)}</span>
                   <div className="app-settings-member-controls">

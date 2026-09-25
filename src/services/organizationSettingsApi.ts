@@ -254,6 +254,7 @@ export interface OrganizationMember {
   userId: string;
   email: string;
   displayName: string;
+  avatarUrl?: string | null;
   membershipStatus: OrganizationMembershipStatus;
   userStatus: "active" | "suspended" | "archived";
 }
