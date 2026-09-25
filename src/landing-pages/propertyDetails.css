@@ -45,13 +45,20 @@
 .lp-detail__proximity{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:22px}
 .lp-detail__proximity p{color:var(--lp-muted,#43474e);line-height:1.55;white-space:pre-line}
 .lp-detail__map-shell{min-height:250px;display:flex;flex-direction:column;gap:5px}
-.lp-detail__map{position:relative;min-height:250px;display:flex;flex-direction:column;gap:5px}
-.lp-detail__map iframe{flex:1;width:100%;min-height:230px;border:0;border-radius:7px}
-.lp-detail__map-markers{position:absolute;z-index:2;inset:0;pointer-events:none;overflow:hidden;border-radius:7px}
-.lp-detail__map-marker{position:absolute;display:grid;place-items:center;width:30px;height:30px;transform:translate(-50%,-50%);border:2px solid var(--lp-surface,#fff);border-radius:50%;background:var(--lp-primary);box-shadow:0 2px 7px #1118;color:var(--lp-button-text,#fff);font-size:1rem;line-height:1}
+.lp-detail__interactive-map{position:relative;width:100%;height:250px;overflow:hidden;border-radius:7px;background:#e8edf2;cursor:grab;touch-action:none;user-select:none;isolation:isolate}
+.lp-detail__interactive-map:active{cursor:grabbing}
+.lp-detail__map-tiles{position:absolute;inset:0;overflow:hidden;background:#e8edf2}
+.lp-detail__map-tiles img{position:absolute;width:256px;height:256px;max-width:none;pointer-events:none;user-select:none;-webkit-user-drag:none}
+.lp-detail__map-marker{position:absolute;z-index:3;display:grid;place-items:center;width:30px;height:30px;transform:translate(-50%,-50%);border:2px solid var(--lp-surface,#fff);border-radius:50%;background:var(--lp-primary);box-shadow:0 2px 7px #1118;color:var(--lp-button-text,#fff);font-family:"Segoe UI Emoji","Noto Color Emoji",sans-serif;font-size:1rem;line-height:1;pointer-events:none}
+.lp-detail__map-marker.is-property{z-index:4;width:34px;height:34px;border-width:3px;font-family:inherit;font-size:1.1rem;font-weight:900}
+.lp-detail__map-controls{position:absolute;z-index:5;top:10px;right:10px;display:grid;overflow:hidden;border:1px solid #cdd3db;border-radius:7px;background:#fff;box-shadow:0 2px 8px #1112}
+.lp-detail__map-controls button{width:36px;height:34px;border:0;background:#fff;color:#253044;font:700 1.15rem/1 system-ui,sans-serif;cursor:pointer}
+.lp-detail__map-controls button+button{border-top:1px solid #dfe3e8}
+.lp-detail__map-controls button:hover:not(:disabled),.lp-detail__map-controls button:focus-visible{background:#f4f6f8}
+.lp-detail__map-controls button:focus-visible{position:relative;z-index:1;outline:2px solid var(--lp-primary);outline-offset:-2px}
+.lp-detail__map-controls button:disabled{color:#a8afb8;cursor:not-allowed}
 .lp-detail__nearby-icon{font-family:"Segoe UI Emoji","Noto Color Emoji",sans-serif!important;font-size:1.55rem!important;line-height:1}
-.lp-detail__map small{color:#737a83;font-size:.65rem}
-.lp-detail__map a{align-self:flex-start;color:var(--lp-primary);font-size:.78rem;font-weight:700;text-decoration:underline;text-underline-offset:2px}
+.lp-detail__map-shell>small{color:#737a83;font-size:.65rem}
 .lp-detail__map-shell>a{align-self:flex-start;color:var(--lp-primary);font-size:.78rem;font-weight:700;text-decoration:underline;text-underline-offset:2px}
 .lp-detail__map-placeholder{min-height:240px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:7px;background:linear-gradient(135deg,#f2f5f8,#e6edf2);text-align:center}
 .lp-detail__map-placeholder span{color:var(--lp-primary);font-size:2.4rem}
