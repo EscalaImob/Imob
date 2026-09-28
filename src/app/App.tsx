@@ -1424,14 +1424,12 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
                     new Date(item.startsAt).toDateString() ===
                     day.toDateString(),
                 );
+                const isToday = day.toDateString() === new Date().toDateString();
                 return (
                   <section
                     key={day.toISOString()}
-                    className={
-                      day.toDateString() === new Date().toDateString()
-                        ? "is-today"
-                        : ""
-                    }
+                    className={isToday ? "is-today" : ""}
+                    aria-current={isToday ? "date" : undefined}
                   >
                     <header>
                       <strong>
