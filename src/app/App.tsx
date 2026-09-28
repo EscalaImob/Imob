@@ -1724,6 +1724,7 @@ export function App() {
           userId: currentBootstrap.user.id,
           email: currentBootstrap.user.email,
           displayName: currentBootstrap.user.displayName,
+          avatarUrl: currentBootstrap.user.avatarUrl,
           membershipStatus: "active",
           userStatus: "active",
         },
@@ -2010,7 +2011,11 @@ export function App() {
                   {organizationMembers.map((member) => (
                     <article key={member.membershipId}>
                       <span className="app-organization-member-avatar">
-                        {initials(member.displayName)}
+                        {member.avatarUrl ? (
+                          <img src={member.avatarUrl} alt="" />
+                        ) : (
+                          initials(member.displayName)
+                        )}
                       </span>
                       <div>
                         <strong>{member.displayName}</strong>
