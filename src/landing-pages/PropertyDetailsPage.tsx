@@ -143,7 +143,7 @@ function InteractiveNearbyMap({ title, items, latitude, longitude }: { title: st
     onPointerCancel={finishPointer}
   >
     <div className="lp-detail__map-tiles" aria-hidden="true">
-      {tiles.map((tile) => <img key={`${view.zoom}-${tile.rawX}-${tile.y}`} src={`https://tile.openstreetmap.org/${view.zoom}/${tile.x}/${tile.y}.png`} alt="" draggable={false} style={{ left: tile.left, top: tile.top }} />)}
+      {tiles.map((tile) => <img key={`${view.zoom}-${tile.rawX}-${tile.y}`} src={`https://tile.openstreetmap.org/${view.zoom}/${tile.x}/${tile.y}.png`} alt="" draggable={false} referrerPolicy="origin" style={{ left: tile.left, top: tile.top }} />)}
     </div>
     <span className="lp-detail__map-marker is-property" style={{ left: propertyPoint.x, top: propertyPoint.y }} title="Localização aproximada do imóvel" aria-label="Localização aproximada do imóvel">⌂</span>
     {validNearby.map((item, index) => {
