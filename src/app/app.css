@@ -63,11 +63,17 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   background: #fff;
   text-align: center;
 }
-.app-loading img,
+.app-loading { gap: 8px; background: #000; }
+.app-loading__splash { display: block; width: min(270px, 72vw); max-height: min(480px, 72dvh); height: auto; object-fit: contain; }
+.app-loading__fallback { display: none; width: 138px; height: auto; }
+.app-loading p { margin: -44px 0 0; color: rgba(255,255,255,.72); font-size: 13px; }
 .app-access-error > img { width: 138px; height: auto; }
-.app-loading p { margin: 0; color: var(--app-muted); font-size: 14px; }
-.app-spinner { width: 34px; height: 34px; border: 3px solid #e8e9ef; border-top-color: var(--app-blue); border-radius: 50%; animation: app-spin .8s linear infinite; }
-@keyframes app-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .app-loading__splash { display: none; }
+  .app-loading__fallback { display: block; }
+  .app-loading { gap: 18px; background: #fff; }
+  .app-loading p { margin: 0; color: var(--app-muted); font-size: 14px; }
+}
 .app-access-error section { width: min(560px, 100%); padding: 30px; border: 1px solid var(--app-border); border-radius: 18px; box-shadow: 0 18px 50px rgba(23, 25, 35, .08); }
 .app-access-error h1 { margin: 0 0 12px; font-size: 24px; }
 .app-access-error p { margin: 0; color: var(--app-muted); line-height: 1.6; }

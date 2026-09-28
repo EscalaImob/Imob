@@ -8,6 +8,7 @@ import {
 } from "react";
 import brandLogo from "../assets/brand/escala-imob-original.svg";
 import platformBrandLogo from "../assets/brand/escala-imob-white.png";
+import entrySplash from "../assets/brand/escala-imob-splash-premium.gif";
 import { clearAuthSession, ensureValidAuthSession } from "../auth/session";
 import {
   AppApiError,
@@ -545,8 +546,8 @@ function navAvailable(item: NavItem, data: AppBootstrapResult): boolean {
 function LoadingScreen() {
   return (
     <main className="app-loading" aria-live="polite">
-      <img src={brandLogo} alt="Escala IMOB" />
-      <span className="app-spinner" aria-hidden="true" />
+      <img className="app-loading__splash" src={entrySplash} alt="Escala IMOB" />
+      <img className="app-loading__fallback" src={brandLogo} alt="Escala IMOB" />
       <p>Preparando sua área de trabalho...</p>
     </main>
   );
