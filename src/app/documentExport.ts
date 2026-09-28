@@ -21,9 +21,18 @@ function finalizedDocumentHtml(title: string, sections: ExportSection[], brand: 
 }
 
 
-export function previewDocument(title: string, sections: ExportSection[], brand: DocumentBrand) {
+export function openDocumentPreviewWindow() {
   const popup = globalThis.open("", "_blank");
-  if (!popup) return false;
+  if (!popup) return null;
+  popup.document.open();
+  popup.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Carregando documento...</title><style>body{font-family:Arial,Helvetica,sans-serif;display:grid;min-height:100vh;place-items:center;margin:0;color:#475467;background:#f8fafc}p{font-weight:700}</style></head><body><p>Carregando documento...</p></body></html>');
+  popup.document.close();
+  return popup;
+}
+
+export function previewDocument(title: string, sections: ExportSection[], brand: DocumentBrand, target?: Window | null) {
+  const popup = target === undefined ? globalThis.open("", "_blank") : target;
+  if (!popup || popup.closed) return false;
   popup.document.open();
   popup.document.write(finalizedDocumentHtml(title, sections, brand));
   popup.document.close();
