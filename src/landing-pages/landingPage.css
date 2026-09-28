@@ -28,3 +28,14 @@
 @container (min-width:901px){.lp-navigation .lp-shell{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}.lp-navigation strong{grid-column:1}.lp-navigation nav{grid-column:2;justify-content:center}}
 
 @container(max-width:560px){.lp-properties__all .lp-button{width:100%}}
+
+
+/* Featured properties: catalogue action in the section heading */
+.lp-section>header.lp-properties__heading{max-width:none;display:flex;align-items:flex-end;justify-content:space-between;gap:28px}
+.lp-properties__heading>div{max-width:680px}
+.lp-properties__heading>div>p{margin-bottom:0}
+.lp-properties__view-all{flex:0 0 auto;min-width:150px}
+@container(max-width:560px){
+  .lp-section>header.lp-properties__heading{align-items:stretch;flex-direction:column;gap:18px}
+  .lp-properties__view-all{width:100%}
+}
