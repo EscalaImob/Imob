@@ -106,6 +106,7 @@ function PublicationModal({
   initialPropertyId,
   initialMediaAssetId,
   canWrite,
+  viewOnly = false,
   onClose,
   onSaved,
 }: {
@@ -115,6 +116,7 @@ function PublicationModal({
   initialPropertyId: string;
   initialMediaAssetId: string;
   canWrite: boolean;
+  viewOnly?: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -202,6 +204,7 @@ function PublicationModal({
   const selectedReelAsset =
     reelAssets.find((asset) => asset.id === draft.mediaAssetId) ?? null;
   const terminal = item?.status === "published" || item?.status === "canceled";
+  const locked = terminal || viewOnly;
   const allowedStatuses = item
     ? transitions[item.status]
     : (["draft", "approved", "scheduled", "published", "canceled"] as const);
@@ -298,12 +301,12 @@ function PublicationModal({
         className="app-modal app-publication-modal"
         role="dialog"
         aria-modal="true"
-        aria-label={item ? "Editar publicação" : "Nova publicação"}
+        aria-label={viewOnly ? "Visualizar publicação" : item ? "Editar publicação" : "Nova publicação"}
       >
         <header>
           <div>
             <span className="app-section-eyebrow">Portfólio · Publicações</span>
-            <h2>{item ? "Editar publicação" : "Nova publicação"}</h2>
+            <h2>{viewOnly ? "Visualizar publicação" : item ? "Editar publicação" : "Nova publicação"}</h2>
           </div>
           <button type="button" onClick={onClose} aria-label="Fechar">
             ×
@@ -316,7 +319,7 @@ function PublicationModal({
               <span>Imóvel *</span>
               <select
                 value={draft.propertyId}
-                disabled={Boolean(item) || terminal}
+                disabled={Boolean(item) || locked}
                 onChange={(event) => chooseProperty(event.target.value)}
               >
                 <option value="">Selecione um imóvel</option>
@@ -350,7 +353,7 @@ function PublicationModal({
               <span>Objetivo *</span>
               <select
                 value={draft.objective}
-                disabled={terminal}
+                disabled={locked}
                 onChange={(event) =>
                   set(
                     "objective",
@@ -369,7 +372,7 @@ function PublicationModal({
               <span>Canal *</span>
               <select
                 value={draft.channel}
-                disabled={terminal}
+                disabled={locked}
                 onChange={(event) =>
                   set(
                     "channel",
@@ -388,7 +391,7 @@ function PublicationModal({
               <span>Formato *</span>
               <select
                 value={draft.format}
-                disabled={terminal}
+                disabled={locked}
                 onChange={(event) =>
                   chooseFormat(event.target.value as PortfolioPublicationFormat)
                 }
@@ -400,7 +403,7 @@ function PublicationModal({
                 ))}
               </select>
             </label>
-            {property && draft.channel === "instagram" && draft.format === "feed" && (
+            {!viewOnly && property && draft.channel === "instagram" && draft.format === "feed" && (
               <div className="app-publication-instagram-template is-wide">
                 <div className="app-publication-instagram-template__header">
                   <div>
@@ -455,7 +458,7 @@ function PublicationModal({
                     <span>Vídeo *</span>
                     <select
                       value={draft.mediaAssetId ?? ""}
-                      disabled={terminal || reelAssetsLoading}
+                      disabled={locked || reelAssetsLoading}
                       onChange={(event) =>
                         set("mediaAssetId", event.target.value || null)
                       }
@@ -506,7 +509,7 @@ function PublicationModal({
               <span>Status *</span>
               <select
                 value={draft.status}
-                disabled={terminal}
+                disabled={locked}
                 onChange={(event) =>
                   set(
                     "status",
@@ -527,7 +530,7 @@ function PublicationModal({
               <span>Título *</span>
               <input
                 value={draft.title}
-                disabled={terminal}
+                disabled={locked}
                 onChange={(event) => set("title", event.target.value)}
               />
             </label>
@@ -536,7 +539,7 @@ function PublicationModal({
               <textarea
                 rows={7}
                 value={draft.caption}
-                disabled={terminal}
+                disabled={locked}
                 onChange={(event) => set("caption", event.target.value)}
               />
             </label>
@@ -544,7 +547,7 @@ function PublicationModal({
               <span>CTA</span>
               <input
                 value={draft.cta ?? ""}
-                disabled={terminal}
+                disabled={locked}
                 onChange={(event) => set("cta", event.target.value || null)}
                 placeholder="Ex.: Agende uma visita"
               />
@@ -553,7 +556,7 @@ function PublicationModal({
               <span>Hashtags</span>
               <input
                 value={hashtagText}
-                disabled={terminal}
+                disabled={locked}
                 onChange={(event) => setHashtagText(event.target.value)}
                 placeholder="#Imoveis #Venda"
               />
@@ -562,7 +565,7 @@ function PublicationModal({
               <span>Campanha</span>
               <input
                 value={draft.campaignName ?? ""}
-                disabled={terminal}
+                disabled={locked}
                 onChange={(event) =>
                   set("campaignName", event.target.value || null)
                 }
@@ -573,7 +576,7 @@ function PublicationModal({
               <input
                 type="url"
                 value={draft.trackingLink ?? ""}
-                disabled={terminal}
+                disabled={locked}
                 onChange={(event) =>
                   set("trackingLink", event.target.value || null)
                 }
@@ -586,7 +589,7 @@ function PublicationModal({
                 <input
                   type="datetime-local"
                   value={toLocalInput(draft.scheduledAt)}
-                  disabled={terminal}
+                  disabled={locked}
                   onChange={(event) =>
                     set("scheduledAt", fromLocalInput(event.target.value))
                   }
@@ -660,6 +663,7 @@ export function PublicationsPage({
   const [modalItem, setModalItem] = useState<
     PublicationListItem | "new" | null
   >(initialMediaAssetId ? "new" : null);
+  const [viewItem, setViewItem] = useState<PublicationListItem | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const query = useMemo(
     () => ({
@@ -948,6 +952,7 @@ export function PublicationsPage({
                     )}
                   </span>
                   <span className="app-row-actions">
+                    <button className="app-secondary-button" type="button" onClick={() => setViewItem(item)}>Visualizar</button>
                     {canUpdate && <button className="app-secondary-button" type="button" onClick={() => setModalItem(item)}>Editar</button>}
                     {canUpdate && item.status !== "published" && item.status !== "canceled" && <button className="app-secondary-button is-danger" type="button" disabled={removingId === item.id} onClick={() => void removePublication(item)}>{removingId === item.id ? "Excluindo..." : "Excluir"}</button>}
                   </span>
@@ -982,6 +987,19 @@ export function PublicationsPage({
           </>
         )}
       </section>
+      {viewItem && options && (
+        <PublicationModal
+          organizationId={organizationId}
+          options={options}
+          item={viewItem}
+          initialPropertyId=""
+          initialMediaAssetId=""
+          canWrite={false}
+          viewOnly
+          onClose={() => setViewItem(null)}
+          onSaved={() => setViewItem(null)}
+        />
+      )}
       {modalItem && options && (
         <PublicationModal
           organizationId={organizationId}

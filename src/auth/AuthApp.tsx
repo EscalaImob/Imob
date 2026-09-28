@@ -1,6 +1,7 @@
 import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import heroImage from "../assets/images/hero-escala-imob.png";
 import whiteLogo from "../assets/brand/escala-imob-white.png";
+import loginSplash from "../assets/brand/escala-imob-splash-premium.gif";
 import {
   AuthApiError,
   confirmEmailVerification,
@@ -57,11 +58,32 @@ function EyeIcon({ hidden }: { hidden: boolean }) {
   );
 }
 
-function AuthShell({ children }: { children: ReactNode }) {
+function AuthShell({ children, showLoginSplash = false }: { children: ReactNode; showLoginSplash?: boolean }) {
+  const [splashVisible, setSplashVisible] = useState(showLoginSplash);
+
+  useEffect(() => {
+    if (!showLoginSplash) {
+      setSplashVisible(false);
+      return;
+    }
+    if (globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      setSplashVisible(false);
+      return;
+    }
+    setSplashVisible(true);
+    const handle = globalThis.setTimeout(() => setSplashVisible(false), 2700);
+    return () => globalThis.clearTimeout(handle);
+  }, [showLoginSplash]);
+
   return (
     <main className="auth-shell" style={{ backgroundImage: `url(${heroImage})` }}>
       <div className="auth-shell__veil" aria-hidden="true" />
       {children}
+      {showLoginSplash && (
+        <div className={`auth-login-splash${splashVisible ? " is-visible" : ""}`} aria-hidden="true">
+          <img src={loginSplash} alt="" />
+        </div>
+      )}
     </main>
   );
 }
@@ -145,7 +167,7 @@ function LoginPage() {
   }
 
   return (
-    <AuthShell>
+    <AuthShell showLoginSplash>
       <section className="auth-card auth-card--login">
         <AuthLogo />
         <header className="auth-heading auth-heading--login">

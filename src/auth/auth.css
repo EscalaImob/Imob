@@ -27,6 +27,35 @@ a { color: inherit; }
   overflow: hidden;
 }
 
+
+.auth-login-splash {
+  position: absolute;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #000;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .22s ease, visibility 0s linear .22s;
+}
+.auth-login-splash.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transition: none;
+}
+.auth-login-splash img {
+  display: block;
+  width: min(270px, 72vw);
+  height: auto;
+  max-height: 82vh;
+  object-fit: contain;
+}
+@media (prefers-reduced-motion: reduce) {
+  .auth-login-splash { display: none; }
+}
+
 .auth-shell__veil {
   position: absolute;
   inset: 0;
