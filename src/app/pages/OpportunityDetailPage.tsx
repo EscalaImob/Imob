@@ -14,9 +14,11 @@ import {
 import { listTasks, type TaskListItem } from "../../services/productivityApi";
 import { listVisits, type VisitListItem } from "../../services/visitsApi";
 import { listProperties, type PropertyListItem } from "../../services/propertiesApi";
+import { formatInTimeZone } from "../timezone";
 
 interface Props {
   organizationId: string;
+  timezone: string;
   canUpdate: boolean;
   canReadTask: boolean;
   canCreateTask: boolean;
@@ -58,8 +60,8 @@ function formatCurrency(value: string): string {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(number);
 }
 
-function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
+function formatDateTime(value: string, timezone = Intl.DateTimeFormat().resolvedOptions().timeZone): string {
+  return formatInTimeZone(value, timezone, { dateStyle: "short", timeStyle: "short" });
 }
 
 function eventTitle(event: OpportunityTimelineEvent): string {
@@ -146,7 +148,7 @@ function temperatureLabel(value: OpportunityDetail["temperature"]): string {
   return "Não informada";
 }
 
-export function OpportunityDetailPage({ organizationId, canUpdate, canReadTask, canCreateTask, canUpdateTask, canReadVisit, canCreateVisit, canUpdateVisit, canReadProperties, canCreateProperty }: Props) {
+export function OpportunityDetailPage({ organizationId, timezone, canUpdate, canReadTask, canCreateTask, canUpdateTask, canReadVisit, canCreateVisit, canUpdateVisit, canReadProperties, canCreateProperty }: Props) {
   const opportunityId = useMemo(readOpportunityId, []);
   const [detail, setDetail] = useState<OpportunityDetail | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -345,7 +347,7 @@ export function OpportunityDetailPage({ organizationId, canUpdate, canReadTask, 
 
       {canReadVisit && <section className="app-detail-panel app-opportunity-tasks-panel">
         <header><div><PinIcon /><strong>Próximas visitas</strong></div>{canCreateVisit && <button type="button" className="app-secondary-button" onClick={() => setVisitModal(null)}>+ Agendar visita</button>}</header>
-        {visitsLoading ? <div className="app-list-loading app-list-loading--compact">Carregando visitas...</div> : relatedVisits.length === 0 ? <div className="app-opportunity-tasks-empty"><p>Nenhuma visita futura vinculada a esta oportunidade.</p>{canCreateVisit && <button type="button" className="app-primary-button" onClick={() => setVisitModal(null)}>Agendar visita</button>}</div> : <div className="app-opportunity-visit-list">{relatedVisits.map((visit) => <button type="button" key={visit.id} disabled={!canUpdateVisit} onClick={() => { if (canUpdateVisit) setVisitModal(visit); }}><span className={`app-visit-status status-${visit.status}`}>{visit.status === "confirmed" ? "Confirmada" : "Agendada"}</span><strong>{visit.title}</strong><span>{visit.location}</span><time>{formatDateTime(visit.startsAt)}</time></button>)}</div>}
+        {visitsLoading ? <div className="app-list-loading app-list-loading--compact">Carregando visitas...</div> : relatedVisits.length === 0 ? <div className="app-opportunity-tasks-empty"><p>Nenhuma visita futura vinculada a esta oportunidade.</p>{canCreateVisit && <button type="button" className="app-primary-button" onClick={() => setVisitModal(null)}>Agendar visita</button>}</div> : <div className="app-opportunity-visit-list">{relatedVisits.map((visit) => <button type="button" key={visit.id} disabled={!canUpdateVisit} onClick={() => { if (canUpdateVisit) setVisitModal(visit); }}><span className={`app-visit-status status-${visit.status}`}>{visit.status === "confirmed" ? "Confirmada" : "Agendada"}</span><strong>{visit.title}</strong><span>{visit.location}</span><time>{formatDateTime(visit.startsAt, timezone)}</time></button>)}</div>}
       </section>}
 
       <section className="app-opportunity-activity-grid">
@@ -382,7 +384,7 @@ export function OpportunityDetailPage({ organizationId, canUpdate, canReadTask, 
         </ol>}
       </section>
       {taskModal !== undefined && opportunityId && <TaskModal organizationId={organizationId} task={taskModal} preset={{ opportunityId, contactId: detail.contact.id, title: `Próximo passo — ${detail.title}` }} onClose={() => setTaskModal(undefined)} onSaved={() => { setTaskModal(undefined); void load(); }} />}
-      {visitModal !== undefined && opportunityId && <VisitModal organizationId={organizationId} visit={visitModal} preset={{ contactId: detail.contact.id, contactName: detail.contact.name, opportunityId, opportunityTitle: detail.title, ...(captureProperty ? { propertyId: captureProperty.id, propertyTitle: `${captureProperty.internalCode} · ${captureProperty.title}` } : {}), title: `Visita — ${detail.contact.name}` }} canReadContacts={false} canReadOpportunities={false} canReadProperties={canReadProperties} onClose={() => setVisitModal(undefined)} onSaved={() => { setVisitModal(undefined); void load(); }} />}
+      {visitModal !== undefined && opportunityId && <VisitModal organizationId={organizationId} timezone={timezone} visit={visitModal} preset={{ contactId: detail.contact.id, contactName: detail.contact.name, opportunityId, opportunityTitle: detail.title, ...(captureProperty ? { propertyId: captureProperty.id, propertyTitle: `${captureProperty.internalCode} · ${captureProperty.title}` } : {}), title: `Visita — ${detail.contact.name}` }} canReadContacts={false} canReadOpportunities={false} canReadProperties={canReadProperties} onClose={() => setVisitModal(undefined)} onSaved={() => { setVisitModal(undefined); void load(); }} />}
     </>
   );
 }

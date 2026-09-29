@@ -3,28 +3,18 @@ import { AppApiError } from "../../services/appApi";
 import { listProperties, type PropertyListItem } from "../../services/propertiesApi";
 import { getOpportunityBoard, listContacts, type ContactListItem, type OpportunityCard } from "../../services/crmApi";
 import { createVisit, listVisitAssignees, updateVisit, type VisitAssignee, type VisitInput, type VisitListItem, type VisitStatus } from "../../services/visitsApi";
+import { addMinutesToLocalInput, zonedDateTimeInput, zonedLocalInputToDate, zonedLocalInputToIso } from "../timezone";
 
-function toLocalInput(value: string | null | undefined): string {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const offset = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
-}
-function defaultStart(): string {
-  const date = new Date();
-  date.setMinutes(0, 0, 0);
-  date.setHours(date.getHours() + 1);
-  return toLocalInput(date.toISOString());
-}
-function toIso(value: string): string | undefined {
-  if (!value) return undefined;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+function defaultStart(timezone: string): string {
+  const current = zonedDateTimeInput(new Date(), timezone);
+  if (!current) return "";
+  const rounded = `${current.slice(0, 13)}:00`;
+  return addMinutesToLocalInput(rounded, 60);
 }
 
 interface VisitModalProps {
   organizationId: string;
+  timezone: string;
   visit?: VisitListItem | null;
   preset?: { contactId: string; contactName: string; opportunityId?: string; opportunityTitle?: string; propertyId?: string; propertyTitle?: string; title?: string };
   canReadContacts: boolean;
@@ -34,14 +24,14 @@ interface VisitModalProps {
   onSaved: (visit: VisitListItem) => void;
 }
 
-export function VisitModal({ organizationId, visit, preset, canReadContacts, canReadOpportunities, canReadProperties, onClose, onSaved }: VisitModalProps) {
-  const initialStart = visit ? toLocalInput(visit.startsAt) : defaultStart();
+export function VisitModal({ organizationId, timezone, visit, preset, canReadContacts, canReadOpportunities, canReadProperties, onClose, onSaved }: VisitModalProps) {
+  const initialStart = visit ? zonedDateTimeInput(visit.startsAt, timezone) : defaultStart(timezone);
   const [title, setTitle] = useState(visit?.title ?? preset?.title ?? "");
   const [notes, setNotes] = useState(visit?.notes ?? "");
   const [location, setLocation] = useState(visit?.location ?? "");
   const [status, setStatus] = useState<VisitStatus>(visit?.status ?? "scheduled");
   const [startsAt, setStartsAt] = useState(initialStart);
-  const [endsAt, setEndsAt] = useState(visit ? toLocalInput(visit.endsAt) : toLocalInput(new Date(new Date(initialStart).getTime() + 60 * 60_000).toISOString()));
+  const [endsAt, setEndsAt] = useState(visit ? zonedDateTimeInput(visit.endsAt, timezone) : addMinutesToLocalInput(initialStart, 60));
   const [responsibleMembershipId, setResponsibleMembershipId] = useState(visit?.responsible?.membershipId ?? "");
   const [contactId, setContactId] = useState(visit?.contact.id ?? preset?.contactId ?? "");
   const [opportunityId, setOpportunityId] = useState(visit?.opportunity?.id ?? preset?.opportunityId ?? "");
@@ -79,9 +69,10 @@ export function VisitModal({ organizationId, visit, preset, canReadContacts, can
 
   const filteredOpportunities = useMemo(() => opportunities.filter((item) => !contactId || item.contact.id === contactId), [opportunities, contactId]);
   const invalidSchedule = useMemo(() => {
-    const start = new Date(startsAt).getTime(); const end = new Date(endsAt).getTime();
-    return !startsAt || !endsAt || !Number.isFinite(start) || !Number.isFinite(end) || end <= start;
-  }, [startsAt, endsAt]);
+    const start = zonedLocalInputToDate(startsAt, timezone)?.getTime();
+    const end = zonedLocalInputToDate(endsAt, timezone)?.getTime();
+    return !startsAt || !endsAt || start === undefined || end === undefined || end <= start;
+  }, [startsAt, endsAt, timezone]);
 
   function chooseOpportunity(value: string) {
     setOpportunityId(value);
@@ -97,8 +88,8 @@ export function VisitModal({ organizationId, visit, preset, canReadContacts, can
       ...(notes.trim() ? { notes: notes.trim() } : {}),
       location: location.trim(),
       status,
-      startsAt: toIso(startsAt)!,
-      endsAt: toIso(endsAt)!,
+      startsAt: zonedLocalInputToIso(startsAt, timezone)!,
+      endsAt: zonedLocalInputToIso(endsAt, timezone)!,
       ...(responsibleMembershipId ? { responsibleMembershipId } : {}),
       contactId,
       ...(opportunityId ? { opportunityId } : {}),

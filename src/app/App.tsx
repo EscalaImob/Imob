@@ -17,6 +17,7 @@ import {
   type AppBootstrapResult,
 } from "../services/appApi";
 import { applyPanelTheme, readPanelTheme } from "./panelTheme";
+import { calendarDateKey, currentCalendarDate, formatInTimeZone, zonedDateKey, zonedStartOfCalendarDate } from "./timezone";
 import {
   listAgenda,
   listTasks,
@@ -793,7 +794,8 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
     number | null
   >(null);
   const weekDays = useMemo(() => {
-    const start = new Date();
+    const timezone = activeOrganization?.timezone ?? "America/Sao_Paulo";
+    const start = currentCalendarDate(timezone);
     start.setHours(0, 0, 0, 0);
     start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
     return Array.from({ length: 7 }, (_, index) => {
@@ -801,16 +803,18 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
       day.setDate(start.getDate() + index);
       return day;
     });
-  }, []);
+  }, [activeOrganization?.timezone]);
 
   useEffect(() => {
     if (!activeOrganization) return;
-    const to = new Date(weekDays[6]);
-    to.setHours(23, 59, 59, 999);
+    const from = zonedStartOfCalendarDate(weekDays[0], activeOrganization.timezone);
+    const afterWeek = new Date(weekDays[6]);
+    afterWeek.setDate(afterWeek.getDate() + 1);
+    const to = zonedStartOfCalendarDate(afterWeek, activeOrganization.timezone);
     let active = true;
     setWeekLoading(true);
     setWeekError(null);
-    void listAgenda(activeOrganization.id, weekDays[0], to)
+    void listAgenda(activeOrganization.id, from, to)
       .then((result) => {
         if (active) setWeekItems(result.items);
       })
@@ -1420,12 +1424,11 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
           ) : (
             <div className="app-week-calendar">
               {weekDays.map((day) => {
+                const dayKey = calendarDateKey(day);
                 const items = weekItems.filter(
-                  (item) =>
-                    new Date(item.startsAt).toDateString() ===
-                    day.toDateString(),
+                  (item) => zonedDateKey(item.startsAt, activeOrganization!.timezone) === dayKey,
                 );
-                const isToday = day.toDateString() === new Date().toDateString();
+                const isToday = dayKey === zonedDateKey(new Date(), activeOrganization!.timezone);
                 return (
                   <section
                     key={day.toISOString()}
@@ -1448,10 +1451,10 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
                           title={item.description ?? item.title}
                         >
                           <time>
-                            {new Intl.DateTimeFormat("pt-BR", {
+                            {formatInTimeZone(item.startsAt, activeOrganization!.timezone, {
                               hour: "2-digit",
                               minute: "2-digit",
-                            }).format(new Date(item.startsAt))}
+                            })}
                           </time>
                           <strong>{item.title}</strong>
                         </article>
@@ -1482,12 +1485,12 @@ function OverviewPage({ bootstrap }: { bootstrap: AppBootstrapResult }) {
               {upcomingVisits.map((visit) => (
                 <article key={visit.id}>
                   <time>
-                    {new Intl.DateTimeFormat("pt-BR", {
+                    {formatInTimeZone(visit.startsAt, activeOrganization!.timezone, {
                       day: "2-digit",
                       month: "short",
                       hour: "2-digit",
                       minute: "2-digit",
-                    }).format(new Date(visit.startsAt))}
+                    })}
                   </time>
                   <strong>{visit.title}</strong>
                   <span>
@@ -2317,6 +2320,7 @@ export function App() {
             hasPermission(bootstrap, "crm.opportunities.read") ? (
               <OpportunityDetailPage
                 organizationId={activeOrganization.id}
+                timezone={activeOrganization.timezone}
                 canUpdate={canUpdateOpportunity}
                 canReadTask={canReadTask}
                 canCreateTask={canCreateTask}
@@ -2347,6 +2351,7 @@ export function App() {
             hasPermission(bootstrap, "productivity.calendar.read") ? (
               <AgendaPage
                 organizationId={activeOrganization.id}
+                timezone={activeOrganization.timezone}
                 canCreate={canCreateCalendarEvent}
               />
             ) : (
@@ -2356,6 +2361,7 @@ export function App() {
             hasPermission(bootstrap, "productivity.visits.read") ? (
               <VisitsPage
                 organizationId={activeOrganization.id}
+                timezone={activeOrganization.timezone}
                 canCreate={canCreateVisit}
                 canUpdate={canUpdateVisit}
                 canReadContacts={canReadContacts}
