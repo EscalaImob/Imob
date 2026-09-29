@@ -6,8 +6,10 @@ import {
 } from "../../services/aiStudioApi";
 import {
   createPublication,
+  getPublicationArtwork,
   getPublicationOptions,
   listPublications,
+  savePublicationArtwork,
   updatePublication,
   type PortfolioPublicationChannel,
   type PortfolioPublicationFormat,
@@ -15,6 +17,7 @@ import {
   type PortfolioPublicationStatus,
   type PublicationFields,
   type PublicationListItem,
+  type PublicationArtworkItem,
   type PublicationListResult,
   type PublicationOptions,
   type PublicationPropertyOption,
@@ -155,9 +158,13 @@ function PublicationModal({
   const [reelAssets, setReelAssets] = useState<AiStudioReelAsset[]>([]);
   const [reelAssetsLoading, setReelAssetsLoading] = useState(false);
   const [reelAssetsError, setReelAssetsError] = useState<string | null>(null);
-  const [artwork, setArtwork] = useState<{ url: string; fileName: string } | null>(null);
+  const [artwork, setArtwork] = useState<{ url: string; fileName: string; blob: Blob } | null>(null);
   const [artworkLoading, setArtworkLoading] = useState(false);
   const [artworkError, setArtworkError] = useState<string | null>(null);
+  const [persistedArtwork, setPersistedArtwork] = useState<PublicationArtworkItem | null>(null);
+  const [persistedArtworkLoading, setPersistedArtworkLoading] = useState(false);
+  const [persistedArtworkError, setPersistedArtworkError] = useState<string | null>(null);
+  const [partialPublicationId, setPartialPublicationId] = useState<string | null>(null);
   const property =
     options.properties.find((candidate) => candidate.id === draft.propertyId) ??
     null;
@@ -171,6 +178,36 @@ function PublicationModal({
       if (url) URL.revokeObjectURL(url);
     };
   }, [artwork?.url]);
+  useEffect(() => {
+    if (!viewOnly || !item || item.channel !== "instagram" || item.format !== "feed") {
+      setPersistedArtwork(null);
+      setPersistedArtworkError(null);
+      setPersistedArtworkLoading(false);
+      return;
+    }
+    let active = true;
+    setPersistedArtworkLoading(true);
+    setPersistedArtworkError(null);
+    void getPublicationArtwork(organizationId, item.id)
+      .then((savedArtwork) => {
+        if (active) setPersistedArtwork(savedArtwork);
+      })
+      .catch((loadError) => {
+        if (!active) return;
+        setPersistedArtwork(null);
+        setPersistedArtworkError(
+          loadError instanceof AppApiError
+            ? loadError.message
+            : "Não foi possível carregar a arte salva desta publicação.",
+        );
+      })
+      .finally(() => {
+        if (active) setPersistedArtworkLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [item, organizationId, viewOnly]);
   useEffect(() => {
     if (draft.format !== "reel" || !draft.propertyId) {
       setReelAssets([]);
@@ -204,7 +241,7 @@ function PublicationModal({
   const selectedReelAsset =
     reelAssets.find((asset) => asset.id === draft.mediaAssetId) ?? null;
   const terminal = item?.status === "published" || item?.status === "canceled";
-  const locked = terminal || viewOnly;
+  const locked = terminal || viewOnly || Boolean(partialPublicationId);
   const allowedStatuses = item
     ? transitions[item.status]
     : (["draft", "approved", "scheduled", "published", "canceled"] as const);
@@ -255,6 +292,7 @@ function PublicationModal({
       setArtwork({
         url: URL.createObjectURL(blob),
         fileName: `instagram-oportunidade-${safeCode}.png`,
+        blob,
       });
     } catch (artworkCause) {
       setArtworkError(
@@ -282,8 +320,22 @@ function PublicationModal({
     ];
     try {
       const payload = { ...draft, hashtags };
-      if (item) await updatePublication(organizationId, item.id, payload);
-      else await createPublication(organizationId, payload);
+      let publicationId = item?.id ?? partialPublicationId;
+      if (item) {
+        await updatePublication(organizationId, item.id, payload);
+      } else if (!publicationId) {
+        const created = await createPublication(organizationId, payload);
+        publicationId = created.id;
+        setPartialPublicationId(created.id);
+      }
+      if (
+        publicationId &&
+        artwork &&
+        draft.channel === "instagram" &&
+        draft.format === "feed"
+      ) {
+        await savePublicationArtwork(organizationId, publicationId, artwork.blob);
+      }
       onSaved();
     } catch (saveError) {
       setError(
@@ -403,6 +455,33 @@ function PublicationModal({
                 ))}
               </select>
             </label>
+            {viewOnly && draft.channel === "instagram" && draft.format === "feed" && (
+              <div className="app-publication-instagram-template is-wide">
+                <div className="app-publication-instagram-template__header">
+                  <div>
+                    <strong>Arte salva · Instagram 4:5</strong>
+                    <span>Esta é a versão PNG que foi armazenada junto desta publicação.</span>
+                  </div>
+                  {persistedArtworkLoading && <span className="app-spinner" />}
+                </div>
+                {persistedArtworkError && <div className="app-inline-error">{persistedArtworkError}</div>}
+                {!persistedArtworkLoading && !persistedArtworkError && persistedArtwork && (
+                  <div className="app-publication-instagram-template__preview">
+                    <img src={persistedArtwork.viewUrl} alt="Arte salva da publicação para Instagram" />
+                    <div>
+                      <strong>Arte da publicação</strong>
+                      <span>PNG salvo em {dateTimeLabel(persistedArtwork.updatedAt)}.</span>
+                      <a className="app-primary-button" href={persistedArtwork.downloadUrl} target="_blank" rel="noopener noreferrer">Baixar PNG</a>
+                    </div>
+                  </div>
+                )}
+                {!persistedArtworkLoading && !persistedArtworkError && !persistedArtwork && (
+                  <div className="app-soft-empty">
+                    Esta publicação ainda não possui uma arte PNG salva. Publicações criadas antes desta atualização precisam ter a arte gerada e salva novamente.
+                  </div>
+                )}
+              </div>
+            )}
             {!viewOnly && property && draft.channel === "instagram" && draft.format === "feed" && (
               <div className="app-publication-instagram-template is-wide">
                 <div className="app-publication-instagram-template__header">
@@ -425,7 +504,7 @@ function PublicationModal({
                     <img src={artwork.url} alt="Prévia da arte Oportunidade para Instagram" />
                     <div>
                       <strong>Arte pronta para publicação</strong>
-                      <span>O arquivo é gerado localmente a partir dos dados atuais do imóvel e não altera a foto original.</span>
+                      <span>O arquivo é gerado localmente a partir dos dados atuais do imóvel. Ao salvar a publicação, esta versão será armazenada para visualização futura.</span>
                       <a className="app-primary-button" href={artwork.url} download={artwork.fileName}>Baixar PNG</a>
                     </div>
                   </div>
@@ -633,9 +712,11 @@ function PublicationModal({
               >
                 {saving
                   ? "Salvando..."
-                  : item
-                    ? "Salvar publicação"
-                    : "Criar publicação"}
+                  : partialPublicationId
+                    ? "Tentar salvar arte novamente"
+                    : item
+                      ? "Salvar publicação"
+                      : "Criar publicação"}
               </button>
             )}
           </footer>

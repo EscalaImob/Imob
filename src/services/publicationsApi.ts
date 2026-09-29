@@ -14,7 +14,26 @@ export interface PublicationFields{propertyId:string;objective:PortfolioPublicat
 export interface PublicationListItem extends PublicationFields{id:string;property:{id:string;internalCode:string;title:string};responsible:{membershipId:string;displayName:string}|null;readiness:PublicationReadiness;snapshot:{propertyId:string;internalCode:string;title:string;publicTitle:string;description:string|null;location:string|null;type:string;purpose:string;salePrice:string|null;rentPrice:string|null;bedrooms:number|null;bathrooms:number|null;parkingSpaces:number|null;amenities:string[];imageIds:string[];primaryImageId:string|null;propertyUpdatedAt:string};approvedAt:string|null;publishedAt:string|null;canceledAt:string|null;failureMessage:string|null;createdBy:{userId:string;displayName:string}|null;createdAt:string;updatedAt:string}
 export interface PublicationListResult{propertiesInMarketing:number;drafts:number;scheduled:number;publishedLast30Days:number;failed:number;items:PublicationListItem[];page:number;pageSize:number;totalItems:number;totalPages:number}
 export interface PublicationOptions{properties:PublicationPropertyOption[]}
+export interface PublicationArtworkItem{contentType:"image/png";sizeBytes:number;updatedAt:string;viewUrl:string;downloadUrl:string;urlExpiresInSeconds:number}
+export interface PublicationArtworkUploadReady{artworkId:string;uploadUrl:string;expiresInSeconds:number;requiredHeaders:{"content-type":"image/png"}}
 export async function listPublications(organizationId:string,filters:{search?:string;status?:PortfolioPublicationStatus;channel?:PortfolioPublicationChannel;propertyId?:string;page?:number;pageSize?:number}={}):Promise<PublicationListResult>{const query=new URLSearchParams();for(const[key,value]of Object.entries(filters))if(value!==undefined&&value!==""&&value!==null)query.set(key,String(value));return tenantRequest(organizationId,`/portfolio/publications${query.size?`?${query}`:""}`);}
 export async function getPublicationOptions(organizationId:string):Promise<PublicationOptions>{return tenantRequest(organizationId,"/portfolio/publications/options");}
 export async function createPublication(organizationId:string,fields:PublicationFields):Promise<PublicationListItem>{return tenantRequest(organizationId,"/portfolio/publications",{method:"POST",body:JSON.stringify(fields)});}
 export async function updatePublication(organizationId:string,publicationId:string,fields:PublicationFields):Promise<PublicationListItem>{return tenantRequest(organizationId,`/portfolio/publications/${encodeURIComponent(publicationId)}`,{method:"PATCH",body:JSON.stringify(fields)});}
+
+export async function getPublicationArtwork(organizationId:string,publicationId:string):Promise<PublicationArtworkItem|null>{return tenantRequest(organizationId,`/portfolio/publications/${encodeURIComponent(publicationId)}/artwork`);}
+export async function savePublicationArtwork(organizationId:string,publicationId:string,blob:Blob):Promise<PublicationArtworkItem>{
+  if(blob.type&&blob.type!=="image/png")throw new AppApiError("A arte precisa estar em PNG.","PUBLICATION_ARTWORK_TYPE");
+  const metadata={contentType:"image/png" as const,sizeBytes:blob.size};
+  const ready=await tenantRequest<PublicationArtworkUploadReady>(organizationId,`/portfolio/publications/${encodeURIComponent(publicationId)}/artwork/upload-url`,{method:"POST",body:JSON.stringify(metadata)});
+  const controller=new AbortController();const timeout=globalThis.setTimeout(()=>controller.abort(),60_000);
+  try{
+    const response=await fetch(ready.uploadUrl,{method:"PUT",headers:{"content-type":ready.requiredHeaders["content-type"]},body:blob,signal:controller.signal});
+    if(!response.ok)throw new AppApiError("Não foi possível enviar a arte para o armazenamento.","PUBLICATION_ARTWORK_UPLOAD_FAILED",response.status);
+  }catch(error){
+    if(error instanceof AppApiError)throw error;
+    if(error instanceof DOMException&&error.name==="AbortError")throw new AppApiError("O envio da arte demorou mais que o esperado.","PUBLICATION_ARTWORK_UPLOAD_TIMEOUT");
+    throw new AppApiError("Não foi possível enviar a arte. Verifique sua conexão.","PUBLICATION_ARTWORK_UPLOAD_NETWORK_ERROR");
+  }finally{globalThis.clearTimeout(timeout);}
+  return tenantRequest(organizationId,`/portfolio/publications/${encodeURIComponent(publicationId)}/artwork/confirm`,{method:"POST",body:JSON.stringify({artworkId:ready.artworkId,...metadata})});
+}
