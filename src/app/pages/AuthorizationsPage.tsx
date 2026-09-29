@@ -3,6 +3,7 @@ import { DocumentIcon, SearchIcon } from "../icons";
 import { AppApiError } from "../../services/appApi";
 import {
   getAuthorization,
+  listAuthorizationDocuments,
   listAuthorizations,
   updateAuthorization,
   type AuthorizationListResult,
@@ -53,6 +54,7 @@ export function AuthorizationsPage({ organizationId, canCreate, canUpdate }: Pro
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [viewingId, setViewingId] = useState<string | null>(null);
   const query = useMemo(
     () => ({
       search: search.trim() || undefined,
@@ -71,6 +73,37 @@ export function AuthorizationsPage({ organizationId, canCreate, canUpdate }: Pro
     setRemovingId(id); setError(null);
     try { const detail=await getAuthorization(organizationId,id); await updateAuthorization(organizationId,id,{type:detail.type,status:"canceled",exclusive:detail.exclusive,commissionPercent:detail.commissionPercent,startsAt:detail.startsAt,endsAt:detail.endsAt,responsibleMembershipId:detail.responsible?.membershipId??null,notes:detail.notes,cancelReason:"Excluída pelo usuário"}); setResult(current=>current?{...current,items:current.items.map(item=>item.id===id?{...item,status:"canceled"}:item)}:current); }
     catch(removeError){setError(removeError instanceof AppApiError?removeError.message:"Não foi possível excluir a autorização.")} finally{setRemovingId(null)}
+  }
+  async function viewAuthorization(id: string) {
+    const previewWindow = globalThis.open("", "_blank");
+    if (!previewWindow) {
+      setError("O navegador bloqueou a visualização. Permita pop-ups para abrir o documento.");
+      return;
+    }
+    previewWindow.opener = null;
+    previewWindow.document.title = "Carregando autorização...";
+    previewWindow.document.body.innerHTML = '<p style="font-family:system-ui,sans-serif;padding:24px">Carregando documento...</p>';
+    setViewingId(id);
+    setError(null);
+    try {
+      const documents = await listAuthorizationDocuments(organizationId, id);
+      const latest = [...documents].sort((left, right) => right.version - left.version)[0];
+      if (!latest) {
+        previewWindow.close();
+        setError("Nenhum documento foi gerado para esta autorização.");
+        return;
+      }
+      previewWindow.location.replace(latest.viewUrl);
+    } catch (viewError) {
+      previewWindow.close();
+      setError(
+        viewError instanceof AppApiError
+          ? viewError.message
+          : "Não foi possível visualizar a autorização.",
+      );
+    } finally {
+      setViewingId(null);
+    }
   }
   useEffect(() => {
     const handle = globalThis.setTimeout(() => {
@@ -268,7 +301,7 @@ export function AuthorizationsPage({ organizationId, canCreate, canUpdate }: Pro
                     </em>
                   </span>
                   <span>{item.responsible?.displayName ?? "—"}</span>
-                  <span className="app-row-actions"><a className="app-secondary-button" href={`/app/autorizacao/?id=${encodeURIComponent(item.id)}`}>Editar</a>{canUpdate&&item.status!=="canceled"&&<button className="app-secondary-button is-danger" type="button" disabled={removingId===item.id} onClick={()=>void removeAuthorization(item.id)}>{removingId===item.id?"Excluindo...":"Excluir"}</button>}</span>
+                  <span className="app-row-actions"><button className="app-secondary-button" type="button" disabled={viewingId===item.id} onClick={()=>void viewAuthorization(item.id)}>{viewingId===item.id?"Abrindo...":"Visualizar"}</button><a className="app-secondary-button" href={`/app/autorizacao/?id=${encodeURIComponent(item.id)}`}>Editar</a>{canUpdate&&item.status!=="canceled"&&<button className="app-secondary-button is-danger" type="button" disabled={removingId===item.id} onClick={()=>void removeAuthorization(item.id)}>{removingId===item.id?"Excluindo...":"Excluir"}</button>}</span>
                 </div>
               ))}
             </div>
