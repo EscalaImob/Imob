@@ -161,14 +161,14 @@ export function ClientsPage({ organizationId, canCreate, canUpdate = canCreate }
       };
       const requestedStatus = String(form.get("status") ?? "active");
       const contactStatus = requestedStatus === "inactive" || requestedStatus === "blocked" || requestedStatus === "archived" ? requestedStatus : "active";
-      const saved = selectedContact
-        ? await updateContact(organizationId, selectedContact.id, { ...input, status: contactStatus })
-        : await createContact(organizationId, input);
+      if (selectedContact) await updateContact(organizationId, selectedContact.id, { ...input, status: contactStatus });
+      else await createContact(organizationId, input);
       setModalOpen(false);
       setSelectedContact(null);
       setSelectedProfiles(["interested"]);
-      if (selectedContact) setData((current) => current ? { ...current, items: current.items.map((item) => item.id === saved.id ? { ...item, ...saved } : item) } : current);
-      else { setPage(1); const refreshed = await listContacts(organizationId, { search: debouncedSearch, profile, status, page: 1 }); setData(refreshed); }
+      setPage(1);
+      const refreshed = await listContacts(organizationId, { search: debouncedSearch, profile, status, page: 1 });
+      setData(refreshed);
     } catch (saveError) {
       setFormError(saveError instanceof Error ? saveError.message : "Não foi possível cadastrar o cliente.");
     } finally {
@@ -195,7 +195,9 @@ export function ClientsPage({ organizationId, canCreate, canUpdate = canCreate }
         profiles: contact.profiles,
         status: "archived",
       });
-      setData((current) => current ? { ...current, items: current.items.filter((item) => item.id !== contactId), totalItems: Math.max(0, current.totalItems - 1) } : current);
+      setPage(1);
+      const refreshed = await listContacts(organizationId, { search: debouncedSearch, profile, status, page: 1 });
+      setData(refreshed);
     } catch (removeError) {
       setError(removeError instanceof AppApiError ? removeError.message : "Não foi possível excluir o cliente.");
     } finally {
