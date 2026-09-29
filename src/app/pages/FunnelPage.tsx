@@ -283,17 +283,30 @@ export function FunnelPage({ organizationId, funnelCode, canCreate, canUpdate }:
     return () => globalThis.clearTimeout(timeout);
   }, [search]);
 
+  const fetchBoard = useCallback(
+    () => getOpportunityBoard(organizationId, { funnel: funnelCode, search: debouncedSearch, view }),
+    [organizationId, funnelCode, debouncedSearch, view],
+  );
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      setBoard(await getOpportunityBoard(organizationId, { funnel: funnelCode, search: debouncedSearch, view }));
+      setBoard(await fetchBoard());
     } catch (loadError) {
       setError(loadError instanceof AppApiError ? loadError.message : "Não foi possível carregar o funil.");
     } finally {
       setLoading(false);
     }
-  }, [organizationId, funnelCode, debouncedSearch, view]);
+  }, [fetchBoard]);
+
+  const refreshBoard = useCallback(async () => {
+    try {
+      setBoard(await fetchBoard());
+    } catch (refreshError) {
+      setError(refreshError instanceof AppApiError ? refreshError.message : "A alteração foi salva, mas não foi possível atualizar o resumo do funil.");
+    }
+  }, [fetchBoard]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -352,6 +365,7 @@ export function FunnelPage({ organizationId, funnelCode, canCreate, canUpdate }:
       } : current);
       setTransition(null);
       cancelPointerDrag();
+      await refreshBoard();
     } catch (moveError) {
       if (optimistic) setBoard(previousBoard);
       const message = moveError instanceof AppApiError ? moveError.message : "Não foi possível mover a oportunidade.";
@@ -422,6 +436,7 @@ export function FunnelPage({ organizationId, funnelCode, canCreate, canUpdate }:
       {editingCard && <OpportunityEditModal organizationId={organizationId} card={editingCard} onClose={() => setEditingCard(null)} onSaved={(updated) => {
         setBoard((current) => current ? ({ ...current, funnel: { ...current.funnel, stages: current.funnel.stages.map((stage) => ({ ...stage, opportunities: stage.opportunities.map((card) => card.id === updated.id ? ({ ...card, title: updated.title, estimatedValue: updated.estimatedValue, probability: updated.probability, expectedCloseDate: updated.expectedCloseDate, temperature: updated.temperature, lastActivityAt: updated.lastActivityAt }) : card) })) } }) : current);
         setEditingCard(null);
+        void refreshBoard();
       }} />}
       {transition && <TransitionModal state={transition} lossReasons={board?.funnel.lossReasons ?? []} saving={moving} error={transitionError} onClose={() => { if (!moving) { setTransition(null); setTransitionError(null); cancelPointerDrag(); } }} onConfirm={(lossReasonId) => { if (transition) void executeMove(transition, lossReasonId); }} />}
     </>
