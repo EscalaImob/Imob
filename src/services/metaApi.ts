@@ -3,6 +3,14 @@ import { AppApiError } from "./appApi";
 
 const REQUEST_TIMEOUT_MS = 15_000;
 
+export type MetaErrorCode = "INVALID_JSON" | "ORGANIZATION_REQUIRED" | "UNAUTHORIZED" | "FORBIDDEN" | "FORBIDDEN_ORGANIZATION" | "INVALID_SIGNATURE" | "OPT_OUT" | "WINDOW_CLOSED" | "NOT_FOUND" | "CONFLICT" | "IDEMPOTENCY_CONFLICT" | "ASSET_CONFLICT" | "CONNECTION_REVOKED" | "VALIDATION_ERROR" | "META_NOT_CONFIGURED" | "META_PERMISSION_REQUIRED" | "META_UNAVAILABLE" | "FEATURE_DISABLED" | "INTERNAL_ERROR";
+export class MetaError extends AppApiError {
+  constructor(message: string, code: MetaErrorCode | (string & {}), status?: number) {
+    super(message, code, status);
+    this.name = "MetaError";
+  }
+}
+
 export type Channel = "instagram" | "messenger" | "whatsapp";
 export type AssetType = "instagram_account" | "facebook_page" | "whatsapp_business_account" | "whatsapp_phone_number" | "ad_account";
 export type ConnectionState = "disconnected" | "pending" | "connected" | "expired" | "revoked" | "error";
@@ -60,7 +68,7 @@ export interface LeadOrigin {
 }
 
 // Same authenticated tenant transport as crmApi; no automatic retries or fallback.
-async function request<T>(organizationId: string, path: string, signal?: AbortSignal, input?: object): Promise<T> {
+export async function requestMeta<T>(organizationId: string, path: string, signal?: AbortSignal, input?: object): Promise<T> {
   const controller = new AbortController();
   const abort = () => controller.abort();
   if (signal?.aborted) abort();
@@ -86,7 +94,7 @@ async function request<T>(organizationId: string, path: string, signal?: AbortSi
     });
     const body = await response.json().catch(() => null) as { success?: boolean; data?: T; error?: { code?: string; message?: string } } | null;
     if (!response.ok || body?.success === false) {
-      throw new AppApiError(body?.error?.message || "Não foi possível concluir a operação Meta.", body?.error?.code || "API_ERROR", response.status);
+      throw new MetaError(body?.error?.message || "Não foi possível concluir a operação Meta.", body?.error?.code || "API_ERROR", response.status);
     }
     if (body?.success !== true || body.data == null) {
       throw new AppApiError("Recebemos uma resposta inesperada da plataforma.", "INVALID_API_RESPONSE", response.status);
@@ -126,13 +134,13 @@ function isStatus(value: unknown): value is MetaStatus {
     && (value.connection === null || isConnection(value.connection));
 }
 export async function getMetaStatus(organizationId: string, signal?: AbortSignal): Promise<MetaStatus> {
-  const status = await request<unknown>(organizationId, "/meta/status", signal);
+  const status = await requestMeta<unknown>(organizationId, "/meta/status", signal);
   if (!isStatus(status)) throw new AppApiError("Recebemos um estado Meta inválido.", "INVALID_API_RESPONSE");
   return status;
 }
-export const listMetaConnections = (organizationId: string, signal?: AbortSignal) => request<{ items: MetaConnection[] }>(organizationId, "/meta/connections", signal);
-export const listMetaAssets = (organizationId: string, id: string, signal?: AbortSignal) => request<{ items: MetaAsset[] }>(organizationId, `${connectionPath(id)}/assets`, signal);
-export const startMetaOAuth = (organizationId: string, channel: Channel | null, signal?: AbortSignal) => request<OAuthStart>(organizationId, "/meta/oauth/start", signal, { channel });
-export const selectMetaAssets = (organizationId: string, id: string, assetIds: string[], signal?: AbortSignal) => request<MetaConnection>(organizationId, `${connectionPath(id)}/assets`, signal, { assetIds });
-export const testMetaConnection = (organizationId: string, id: string, signal?: AbortSignal) => request<MetaConnection>(organizationId, `${connectionPath(id)}/test`, signal, {});
-export const revokeMetaConnection = (organizationId: string, id: string, signal?: AbortSignal) => request<MetaConnection>(organizationId, `${connectionPath(id)}/revoke`, signal, {});
+export const listMetaConnections = (organizationId: string, signal?: AbortSignal) => requestMeta<{ items: MetaConnection[] }>(organizationId, "/meta/connections", signal);
+export const listMetaAssets = (organizationId: string, id: string, signal?: AbortSignal) => requestMeta<{ items: MetaAsset[] }>(organizationId, `${connectionPath(id)}/assets`, signal);
+export const startMetaOAuth = (organizationId: string, channel: Channel | null, signal?: AbortSignal) => requestMeta<OAuthStart>(organizationId, "/meta/oauth/start", signal, { channel });
+export const selectMetaAssets = (organizationId: string, id: string, assetIds: string[], signal?: AbortSignal) => requestMeta<MetaConnection>(organizationId, `${connectionPath(id)}/assets`, signal, { assetIds });
+export const testMetaConnection = (organizationId: string, id: string, signal?: AbortSignal) => requestMeta<MetaConnection>(organizationId, `${connectionPath(id)}/test`, signal, {});
+export const revokeMetaConnection = (organizationId: string, id: string, signal?: AbortSignal) => requestMeta<MetaConnection>(organizationId, `${connectionPath(id)}/revoke`, signal, {});

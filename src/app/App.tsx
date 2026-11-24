@@ -2203,8 +2203,18 @@ export function App() {
               ) : (
                 <ModuleAccessDenied title="Integração Meta" />
               )
-            ) : hasPermission(bootstrap, "crm.leads.read") ? (
-              <ConversationsPage key={`${activeOrganization.id}:${activeOrganization.membershipId}`} />
+            ) : hasPermissionAtScope(bootstrap, "crm.leads.read", "own") ? (
+              <ConversationsPage
+                organizationId={activeOrganization.id}
+                membershipId={activeOrganization.membershipId}
+                canSend={hasPermissionAtScope(bootstrap, "crm.leads.manage", "own")}
+                canAssign={hasPermissionAtScope(bootstrap, "crm.leads.manage", "organization")}
+                canReadMembers={canReadUsers}
+                canReadMeta={canReadMeta}
+                canReadContact={canReadContacts}
+                canReadOpportunity={canReadOpportunities}
+                canReadProperty={canReadProperties}
+              />
             ) : (
               <ModuleAccessDenied title="Conversas" />
             )
