@@ -32,7 +32,7 @@ type WorkerScope = {
 };
 
 const scope = globalThis as unknown as WorkerScope;
-const TRANSFORMERS_VERSION = "3.8.1";
+const TRANSFORMERS_VERSION = "4.3.2";
 const CLASSIFICATION_MODEL = "Xenova/siglip-base-patch16-224";
 const DEPTH_MODEL = "onnx-community/depth-anything-v2-small";
 const labels = [
@@ -85,9 +85,32 @@ function progressFor(id: string) {
   };
 }
 
-function hasWorkerWebGpu(): boolean {
-  const workerNavigator = globalThis.navigator as Navigator & { gpu?: unknown };
-  return Boolean(workerNavigator?.gpu);
+// Probe actual adapter before initializing ONNX. API exposure alone does not mean
+// the worker has an available GPU. Cache the bounded probe for this worker lifetime.
+let webGpuProbe: Promise<boolean> | null = null;
+function hasWorkerWebGpu(): Promise<boolean> {
+  if (!webGpuProbe) {
+    webGpuProbe = (async () => {
+      const workerNavigator = globalThis.navigator as Navigator & {
+        gpu?: { requestAdapter: () => Promise<unknown> };
+      };
+      const gpu = workerNavigator?.gpu;
+      if (!gpu || typeof gpu.requestAdapter !== "function") return false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const adapter = await Promise.race([
+          gpu.requestAdapter(),
+          new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), 3000); }),
+        ]);
+        return Boolean(adapter);
+      } catch {
+        return false;
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    })();
+  }
+  return webGpuProbe;
 }
 
 async function createPipeline(
@@ -119,7 +142,7 @@ async function runWithFallback<T>(
   execute: (pipe: PipelineCallable) => Promise<T>,
 ): Promise<{ result: T; backend: VisionBackend }> {
   const webGpuDisabled = kind === "classifier" ? classifierWebGpuDisabled : depthWebGpuDisabled;
-  const backends: VisionBackend[] = hasWorkerWebGpu() && !webGpuDisabled ? ["webgpu", "wasm"] : ["wasm"];
+  const backends: VisionBackend[] = !webGpuDisabled && await hasWorkerWebGpu() ? ["webgpu", "wasm"] : ["wasm"];
   let lastError: unknown;
 
   for (const backend of backends) {
