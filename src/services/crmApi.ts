@@ -1,5 +1,6 @@
 import { ensureValidAuthSession } from "../auth/session";
 import { AppApiError } from "./appApi";
+import type { LeadOrigin } from "./metaApi";
 
 const REQUEST_TIMEOUT_MS = 15_000;
 
@@ -60,6 +61,9 @@ export interface CreateContactInput {
 export interface ContactDetail extends ContactListItem { whatsapp: string | null; }
 export interface UpdateContactInput extends CreateContactInput { status: ContactStatus; }
 
+export const META_LEAD_SOURCE = "meta_lead_ads" as const;
+export type LeadSourceFilter = "" | typeof META_LEAD_SOURCE;
+
 export type LeadIntent = "buyer" | "capture";
 export type LeadStatus = "new" | "in_progress" | "converted" | "invalid" | "duplicate" | "spam" | "archived";
 
@@ -82,8 +86,9 @@ export interface LeadListResult {
     email: string | null;
     phone: string | null;
     message: string | null;
-    campaign: string | null;
-    sourcePage: string | null;
+    campaign?: string | null;
+    sourcePage?: string | null;
+    metaOrigin?: LeadOrigin | null;
     context: { relatedPropertyId: string | null; propertyType: string | null; city: string | null; state: string | null };
     sla: {
       firstResponseMinutes: number;
@@ -208,11 +213,12 @@ export async function updateContact(organizationId: string, contactId: string, i
 
 export async function listLeads(
   organizationId: string,
-  filters: { search?: string; intent?: string; status?: string; page?: number },
+  filters: { search?: string; intent?: string; status?: string; source?: LeadSourceFilter; page?: number },
 ): Promise<LeadListResult> {
   const query = new URLSearchParams();
   if (filters.search?.trim()) query.set("search", filters.search.trim());
   if (filters.intent) query.set("intent", filters.intent);
+  if (filters.source) query.set("source", filters.source);
   if (filters.status) query.set("status", filters.status);
   if (filters.page && filters.page > 1) query.set("page", String(filters.page));
   const suffix = query.size > 0 ? `?${query.toString()}` : "";
