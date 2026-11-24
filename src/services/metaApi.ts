@@ -45,6 +45,20 @@ export interface OAuthStart {
   expiresAt: string;
 }
 
+export interface LeadOrigin {
+  leadId: string;
+  contactId: string | null;
+  opportunityId: string | null;
+  externalLeadId: string;
+  assetId: string;
+  formId: string | null;
+  adId: string | null;
+  campaignId: string | null;
+  propertyId: string | null;
+  ingestionState: "pending" | "processed" | "failed";
+  receivedAt: string;
+}
+
 // Same authenticated tenant transport as crmApi; no automatic retries or fallback.
 async function request<T>(organizationId: string, path: string, signal?: AbortSignal, input?: object): Promise<T> {
   const controller = new AbortController();

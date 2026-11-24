@@ -1400,3 +1400,14 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 .app-publication-instagram-template__preview span{font-size:.67rem;line-height:1.45;color:var(--app-muted)}
 .app-publication-instagram-template__preview .app-primary-button{min-height:34px;padding:0 12px;font-size:.68rem;text-decoration:none}
 @media(max-width:620px){.app-publication-instagram-template__header{flex-direction:column}.app-publication-instagram-template__header .app-secondary-button{width:100%}.app-publication-instagram-template__preview{grid-template-columns:110px minmax(0,1fr)}.app-publication-instagram-template__preview img{width:110px}}
+
+/* CRM Lead Ads — origin filter and read-only provenance in the existing detail. */
+.app-lead-detail-modal { max-height: calc(100dvh - 32px); overflow-y: auto; }
+.app-leads-filter-bar { grid-template-columns: minmax(180px, 1.55fr) repeat(3, minmax(115px, .65fr)) auto; }
+.app-lead-meta-origin { padding: 12px; border: 1px solid var(--app-border); border-radius: 8px; background: var(--app-surface-soft); color: var(--app-text); overflow-wrap: anywhere; }
+.app-lead-meta-origin p { margin: 6px 0; color: var(--app-muted); }
+.app-lead-meta-origin dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 10px 0; }
+.app-lead-meta-origin dt { color: var(--app-muted); font-weight: 700; }
+.app-lead-meta-origin dd { margin: 3px 0 0; }
+@media (max-width: 1180px) { .app-leads-filter-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); } .app-leads-filter-bar .app-filter-search { grid-column: span 2; } }
+@media (max-width: 680px) { .app-leads-filter-bar, .app-lead-meta-origin dl { grid-template-columns: 1fr; } .app-leads-filter-bar .app-filter-search { grid-column: auto; } }

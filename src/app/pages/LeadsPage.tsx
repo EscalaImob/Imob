@@ -7,6 +7,9 @@ import {
   convertLead,
   distributeLead,
   listLeads,
+  getLead,
+  META_LEAD_SOURCE,
+  type LeadSourceFilter,
   recordLeadFirstResponse,
   updateLead,
   type LeadAssignmentResult,
@@ -87,7 +90,56 @@ function LeadCreateModal({ organizationId, onClose, onSaved }: { organizationId:
   return <div className="app-modal-backdrop"><section className="app-modal" role="dialog" aria-modal="true"><header className="app-modal__header"><div><span className="app-section-eyebrow">Leads</span><h2>Novo lead</h2></div><button type="button" onClick={onClose} disabled={saving}>×</button></header><form onSubmit={submit}><div className="app-modal__body app-task-form-grid">{error && <div className="app-inline-error is-wide">{error}</div>}<label><span>Intenção</span><select value={intent} onChange={(event) => setIntent(event.target.value as "buyer" | "capture")}><option value="buyer">Comprador / locatário</option><option value="capture">Proprietário / captação</option></select></label><label className="is-wide"><span>Nome *</span><input value={name} onChange={(event) => setName(event.target.value)} required autoFocus /></label><label><span>E-mail</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label><span>Telefone</span><input value={phone} onChange={(event) => setPhone(event.target.value)} /></label><label className="is-wide"><span>Mensagem</span><textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={4} /></label></div><footer className="app-modal__footer"><button type="button" className="app-secondary-button" onClick={onClose}>Fechar</button><button type="submit" className="app-primary-button" disabled={saving || !name.trim() || (!email.trim() && !phone.trim())}>{saving ? "Criando..." : "Criar lead"}</button></footer></form></section></div>;
 }
 
-function LeadEditModal({ organizationId, item, onClose, onSaved }: { organizationId: string; item: LeadListItem; onClose: () => void; onSaved: () => void }) {
+const ingestionLabels = {
+  pending: "Pendente",
+  processed: "Processado",
+  failed: "Falhou",
+};
+
+function leadLoadError(error: unknown): string {
+  if (error instanceof AppApiError && error.status === 403) return "Você não tem permissão para acessar estes leads.";
+  return error instanceof Error ? error.message : "Não foi possível carregar os leads.";
+}
+
+function LeadMetaOrigin({ item }: { item: LeadListItem }) {
+  if (item.source !== META_LEAD_SOURCE) return null;
+  const origin = item.metaOrigin;
+  return <section className="app-lead-meta-origin is-wide" aria-label="Origem Meta Lead Ads">
+    <strong>Meta Lead Ads</strong>
+    <p>Lead recebido por formulário. Esta origem não representa uma conversa.</p>
+    {!origin ? <p>Detalhes da origem Meta indisponíveis.</p> : <dl>
+      <div><dt>Ingestão</dt><dd>{ingestionLabels[origin.ingestionState] ?? "Indisponível"}</dd></div>
+      <div><dt>Recebido pela integração</dt><dd>{formatDateTime(origin.receivedAt)}</dd></div>
+      <div><dt>ID do formulário</dt><dd>{origin.formId ?? "Não informado"}</dd></div>
+      <div><dt>ID do anúncio</dt><dd>{origin.adId ?? "Não informado"}</dd></div>
+      <div><dt>ID da campanha</dt><dd>{origin.campaignId ?? "Não informado"}</dd></div>
+      <div><dt>ID do imóvel vinculado</dt><dd>{origin.propertyId ?? "Não vinculado"}</dd></div>
+    </dl>}
+    {item.campaign && <p>Campanha: {item.campaign}</p>}
+    {item.sourcePage && <p>Página de origem: {item.sourcePage}</p>}
+  </section>;
+}
+
+// Fetch the existing CRM detail with the current tenant and read permission.
+function LeadDetailModal({ organizationId, leadId, canManage, onClose, onSaved }: { organizationId: string; leadId: string; canManage: boolean; onClose: () => void; onSaved: () => void }) {
+  const [item, setItem] = useState<LeadListItem | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    void getLead(organizationId, leadId).then((result) => { if (active) setItem(result); }).catch((loadError) => {
+      if (!active) return;
+      if (loadError instanceof AppApiError && loadError.status === 401) {
+        clearAuthSession(); globalThis.location.replace("/login/"); return;
+      }
+      setError(leadLoadError(loadError));
+    });
+    return () => { active = false; };
+  }, [organizationId, leadId]);
+  if (item) return <LeadEditModal organizationId={organizationId} item={item} canManage={canManage} onClose={onClose} onSaved={onSaved} />;
+  return <div className="app-modal-backdrop"><section className="app-modal" role="dialog" aria-modal="true" aria-label="Ficha do lead"><header className="app-modal__header"><h2>Ficha do lead</h2><button type="button" aria-label="Fechar ficha" onClick={onClose}>×</button></header><div className="app-modal__body">{error ? <div role="alert" className="app-inline-error">{error}</div> : <div role="status" className="app-list-loading">Carregando ficha...</div>}</div></section></div>;
+}
+
+function LeadEditModal({ organizationId, item, canManage, onClose, onSaved }: { organizationId: string; item: LeadListItem; canManage: boolean; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(item.name);
   const [email, setEmail] = useState(item.email ?? "");
   const [phone, setPhone] = useState(item.phone ?? "");
@@ -96,17 +148,23 @@ function LeadEditModal({ organizationId, item, onClose, onSaved }: { organizatio
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); if (!name.trim() || saving) return;
+    event.preventDefault(); if (!canManage || item.status === "converted" || !name.trim() || saving) return;
     setSaving(true); setError(null);
     try { await updateLead(organizationId, item.id, { name: name.trim(), email: email.trim() || null, phone: phone.trim() || null, message: message.trim() || null, status }); onSaved(); }
     catch (saveError) { setError(saveError instanceof AppApiError ? saveError.message : "Não foi possível atualizar o lead."); }
     finally { setSaving(false); }
   }
-  return <div className="app-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}><section className="app-modal" role="dialog" aria-modal="true"><header className="app-modal__header"><div><span className="app-section-eyebrow">Lead</span><h2>Editar lead</h2></div><button type="button" onClick={onClose} disabled={saving}>×</button></header><form onSubmit={submit}><div className="app-modal__body app-task-form-grid">{error && <div className="app-inline-error is-wide">{error}</div>}<label className="is-wide"><span>Nome *</span><input value={name} onChange={(event) => setName(event.target.value)} maxLength={200} required autoFocus /></label><label><span>E-mail</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={320} /></label><label><span>Telefone</span><input value={phone} onChange={(event) => setPhone(event.target.value)} maxLength={32} /></label><label className="is-wide"><span>Status</span><select value={status} onChange={(event) => setStatus(event.target.value as LeadStatus)} disabled={item.status === "converted"}><option value="new">Novo</option><option value="in_progress">Em atendimento</option><option value="invalid">Inválido</option><option value="duplicate">Duplicado</option><option value="spam">Spam</option><option value="archived">Arquivado</option>{item.status === "converted" && <option value="converted">Convertido</option>}</select></label><label className="is-wide"><span>Mensagem</span><textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={5} maxLength={4000} /></label></div><footer className="app-modal__footer"><button type="button" className="app-secondary-button" onClick={onClose} disabled={saving}>Fechar</button><button type="submit" className="app-primary-button" disabled={saving || !name.trim() || item.status === "converted"}>{saving ? "Salvando..." : "Salvar alterações"}</button></footer></form></section></div>;
+  return <div className="app-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}><section className="app-modal app-lead-detail-modal" role="dialog" aria-modal="true" aria-label="Ficha do lead"><header className="app-modal__header"><div><span className="app-section-eyebrow">Lead</span><h2>{canManage ? "Editar lead" : "Ficha do lead"}</h2></div><button type="button" aria-label="Fechar ficha" onClick={onClose} disabled={saving}>×</button></header><form onSubmit={submit}><div className="app-modal__body app-task-form-grid">{error && <div className="app-inline-error is-wide">{error}</div>}<LeadMetaOrigin item={item} /><label className="is-wide"><span>Nome *</span><input readOnly={!canManage} value={name} onChange={(event) => setName(event.target.value)} maxLength={200} required autoFocus /></label><label><span>E-mail</span><input readOnly={!canManage} type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={320} /></label><label><span>Telefone</span><input readOnly={!canManage} value={phone} onChange={(event) => setPhone(event.target.value)} maxLength={32} /></label><label className="is-wide"><span>Status</span><select value={status} onChange={(event) => setStatus(event.target.value as LeadStatus)} disabled={!canManage || item.status === "converted"}><option value="new">Novo</option><option value="in_progress">Em atendimento</option><option value="invalid">Inválido</option><option value="duplicate">Duplicado</option><option value="spam">Spam</option><option value="archived">Arquivado</option>{item.status === "converted" && <option value="converted">Convertido</option>}</select></label><label className="is-wide"><span>Mensagem</span><textarea readOnly={!canManage} value={message} onChange={(event) => setMessage(event.target.value)} rows={5} maxLength={4000} /></label></div><footer className="app-modal__footer"><button type="button" className="app-secondary-button" onClick={onClose} disabled={saving}>Fechar</button>{canManage && <button type="submit" className="app-primary-button" disabled={saving || !name.trim() || item.status === "converted"}>{saving ? "Salvando..." : "Salvar alterações"}</button>}</footer></form></section></div>;
 }
 
 export function LeadsPage({ organizationId, canManage }: { organizationId: string; canManage: boolean }) {
-  const [data, setData] = useState<LeadListResult | null>(null);
+  // Discard previous-tenant data, selection and pending forms on context changes.
+  return <TenantLeadsPage key={`${organizationId}:${canManage}`} organizationId={organizationId} canManage={canManage} />;
+}
+
+function TenantLeadsPage({ organizationId, canManage }: { organizationId: string; canManage: boolean }) {
+  const [listResult, setData] = useState<LeadListResult | null>(null);
+  const [loadedKey, setLoadedKey] = useState("");
   const [distribution, setDistribution] = useState<OrganizationLeadDistributionSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -115,13 +173,18 @@ export function LeadsPage({ organizationId, canManage }: { organizationId: strin
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [intent, setIntent] = useState("");
   const [status, setStatus] = useState("");
+  const [source, setSource] = useState<LeadSourceFilter>("");
   const [page, setPage] = useState(1);
   const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, string>>(Object.create(null));
   const [busyLeadId, setBusyLeadId] = useState<string | null>(null);
   const [selectedLeadId, setSelectedLeadId] = useState("");
-  const [editingLead, setEditingLead] = useState<LeadListItem | null>(null);
+  const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
   const [creatingLead, setCreatingLead] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+
+  const requestKey = JSON.stringify([organizationId, debouncedSearch, intent, status, source, page, reloadKey]);
+  const data = loadedKey === requestKey ? listResult : null;
+  const [distributionError, setDistributionError] = useState<string | null>(null);
 
   useEffect(() => {
     const timeout = globalThis.setTimeout(() => { setDebouncedSearch(search.trim()); setPage(1); }, 300);
@@ -132,18 +195,13 @@ export function LeadsPage({ organizationId, canManage }: { organizationId: strin
     let active = true;
     setLoading(true);
     setError(null);
-    setActionMessage(null);
-    const distributionPromise = canManage
-      ? getOrganizationLeadDistribution(organizationId)
-      : Promise.resolve<OrganizationLeadDistributionSettings | null>(null);
-    void Promise.all([
-      listLeads(organizationId, { search: debouncedSearch, intent, status, page }),
-      distributionPromise,
-    ])
-      .then(([result, distributionResult]) => {
+    setData(null);
+    setSelectedLeadId("");
+    void listLeads(organizationId, { search: debouncedSearch, intent, status, source, page })
+      .then((result) => {
         if (!active) return;
         setData(result);
-        setDistribution(distributionResult);
+        setLoadedKey(requestKey);
         setAssignmentDrafts(Object.fromEntries(result.items.map((item) => [item.id, item.responsible?.membershipId ?? ""])));
       })
       .catch((loadError) => {
@@ -153,18 +211,34 @@ export function LeadsPage({ organizationId, canManage }: { organizationId: strin
           globalThis.location.replace("/login/");
           return;
         }
-        setError(loadError instanceof Error ? loadError.message : "Não foi possível carregar os leads.");
+        setError(leadLoadError(loadError));
+        setLoadedKey(requestKey);
       })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [organizationId, debouncedSearch, intent, status, page, canManage, reloadKey]);
+  }, [organizationId, debouncedSearch, intent, status, source, page, requestKey]);
 
-  const filtered = Boolean(debouncedSearch || intent || status);
+  // Distribution settings are independent of CRM read access.
+  useEffect(() => {
+    if (!canManage) return;
+    let active = true;
+    setDistribution(null);
+    setDistributionError(null);
+    void getOrganizationLeadDistribution(organizationId).then((result) => {
+      if (active) setDistribution(result);
+    }).catch(() => {
+      if (active) setDistributionError("Configuração de distribuição indisponível. A atribuição está temporariamente desabilitada.");
+    });
+    return () => { active = false; };
+  }, [organizationId, canManage, reloadKey]);
+
+  const filtered = Boolean(debouncedSearch || intent || status || source);
+  const pending = loading || loadedKey !== requestKey;
   const summary = data?.summary ?? { pending: 0, inProgress: 0, converted: 0, archived: 0, total: 0, lastReceivedAt: null, averageFirstResponseMinutes: null };
   const distributionByIntent = useMemo(() => new Map(distribution?.policies.map((policy) => [policy.intent, policy]) ?? []), [distribution]);
 
   function clearFilters() {
-    setSearch(""); setDebouncedSearch(""); setIntent(""); setStatus(""); setPage(1);
+    setSearch(""); setDebouncedSearch(""); setIntent(""); setStatus(""); setSource(""); setPage(1);
   }
 
   function applyAssignmentResult(result: LeadAssignmentResult, message: string) {
@@ -177,7 +251,7 @@ export function LeadsPage({ organizationId, canManage }: { organizationId: strin
   }
 
   async function saveAssignment(leadId: string) {
-    if (!canManage || busyLeadId) return;
+    if (!canManage || !distribution || busyLeadId) return;
     setBusyLeadId(leadId);
     setActionMessage(null);
     try {
@@ -200,9 +274,7 @@ export function LeadsPage({ organizationId, canManage }: { organizationId: strin
     setActionMessage(null);
     try {
       const result = await recordLeadFirstResponse(organizationId, leadId);
-      const refreshed = await listLeads(organizationId, { search: debouncedSearch, intent, status, page });
-      setData(refreshed);
-      setAssignmentDrafts(Object.fromEntries(refreshed.items.map((item) => [item.id, item.responsible?.membershipId ?? ""])));
+      setReloadKey((value) => value + 1);
       setActionMessage({
         type: "success",
         text: result.sla.breached
@@ -217,7 +289,7 @@ export function LeadsPage({ organizationId, canManage }: { organizationId: strin
   }
 
   async function applyRoundRobin(leadId: string) {
-    if (!canManage || busyLeadId) return;
+    if (!canManage || !distribution || busyLeadId) return;
     setBusyLeadId(leadId);
     setActionMessage(null);
     try {
@@ -244,29 +316,31 @@ export function LeadsPage({ organizationId, canManage }: { organizationId: strin
   return (
     <>
       <section className="app-section-header">
-        <div><span className="app-section-eyebrow">CRM & Vendas</span><h1>Leads do site</h1><p>Uma fila única com intenção identificada para compradores/locatários ou proprietários/captação.</p></div>
+        <div><span className="app-section-eyebrow">CRM & Vendas</span><h1>Leads</h1><p>Uma fila única com intenção identificada para compradores/locatários ou proprietários/captação, incluindo formulários Meta Lead Ads.</p></div>
         <div className="app-page-heading__actions">{canManage && <button type="button" className="app-primary-button" onClick={() => setCreatingLead(true)}>+ Novo lead</button>}<div className="app-last-received"><span>Último recebido</span><strong>{summary.lastReceivedAt ? formatDateTime(summary.lastReceivedAt) : "—"}</strong></div></div>
       </section>
 
       <section className="app-summary-cards" aria-label="Resumo de leads">
-        <article><strong>{summary.pending}</strong><span>Pendentes</span></article>
-        <article><strong>{summary.inProgress}</strong><span>Em atendimento</span></article>
-        <article><strong>{summary.converted}</strong><span>Convertidos</span></article>
-        <article><strong>{summary.archived}</strong><span>Arquivados</span></article>
+        <article><strong>{data ? summary.pending : "—"}</strong><span>Pendentes</span></article>
+        <article><strong>{data ? summary.inProgress : "—"}</strong><span>Em atendimento</span></article>
+        <article><strong>{data ? summary.converted : "—"}</strong><span>Convertidos</span></article>
+        <article><strong>{data ? summary.archived : "—"}</strong><span>Arquivados</span></article>
         <article><strong>{summary.averageFirstResponseMinutes === null ? "—" : `${Math.round(summary.averageFirstResponseMinutes)} min`}</strong><span>Tempo médio de resposta</span></article>
       </section>
 
       <section className="app-list-card">
-        <div className="app-filter-bar">
+        <div className="app-filter-bar app-leads-filter-bar">
           <label className="app-filter-search"><SearchIcon /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Nome, e-mail, telefone ou mensagem..." /></label>
           <label><span>Intenção</span><select value={intent} onChange={(event) => { setIntent(event.target.value); setPage(1); }}><option value="">Todas</option><option value="buyer">Comprador / locatário</option><option value="capture">Proprietário / captação</option></select></label>
           <label><span>Status</span><select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="">Todos</option><option value="new">Novos</option><option value="in_progress">Em atendimento</option><option value="converted">Convertidos</option><option value="invalid">Inválidos</option><option value="duplicate">Duplicados</option><option value="spam">Spam</option><option value="archived">Arquivados</option></select></label>
+          <label><span>Origem</span><select value={source} onChange={(event) => { setSource(event.target.value === META_LEAD_SOURCE ? META_LEAD_SOURCE : ""); setPage(1); }}><option value="">Todas</option><option value={META_LEAD_SOURCE}>Meta Lead Ads</option></select></label>
           <button className="app-filter-clear" type="button" onClick={clearFilters} disabled={!filtered}>Limpar</button>
         </div>
-        {canManage && data && data.items.length > 0 && <div className="app-filter-bar"><label><span>Gerenciar lead</span><select value={selectedLeadId} onChange={(event) => setSelectedLeadId(event.target.value)}><option value="">Selecione um lead</option>{data.items.map((item) => <option key={item.id} value={item.id}>{item.name} · {statusLabels.get(item.status) ?? item.status}</option>)}</select></label><button className="app-secondary-button" type="button" disabled={!selectedLeadId} onClick={() => setEditingLead(data.items.find((item) => item.id === selectedLeadId) ?? null)}>Abrir e editar</button><button className="app-primary-button" type="button" disabled={!selectedLeadId || Boolean(busyLeadId) || !["new", "in_progress"].includes(data.items.find((item) => item.id === selectedLeadId)?.status ?? "")} onClick={() => void convertSelectedLead()}>{busyLeadId === selectedLeadId ? "Convertendo..." : "Converter em oportunidade"}</button></div>}
+        {data && data.items.length > 0 && <div className="app-filter-bar"><label><span>{canManage ? "Gerenciar lead" : "Consultar lead"}</span><select value={selectedLeadId} onChange={(event) => setSelectedLeadId(event.target.value)}><option value="">Selecione um lead</option>{data.items.map((item) => <option key={item.id} value={item.id}>{item.name} · {statusLabels.get(item.status) ?? item.status}</option>)}</select></label><button className="app-secondary-button" type="button" disabled={!selectedLeadId} onClick={() => setEditingLeadId(selectedLeadId)}>{canManage ? "Abrir e editar" : "Abrir ficha"}</button>{canManage && <button className="app-primary-button" type="button" disabled={!selectedLeadId || Boolean(busyLeadId) || !["new", "in_progress"].includes(data.items.find((item) => item.id === selectedLeadId)?.status ?? "")} onClick={() => void convertSelectedLead()}>{busyLeadId === selectedLeadId ? "Convertendo..." : "Converter em oportunidade"}</button>}</div>}
 
         {actionMessage && <div className={actionMessage.type === "error" ? "app-inline-error" : "app-inline-success"}>{actionMessage.text}</div>}
-        {error ? <div className="app-inline-error">{error}</div> : loading && !data ? <div className="app-list-loading">Carregando leads...</div> : data && data.items.length > 0 ? (
+        {distributionError && <div className="app-inline-error" role="status">{distributionError}</div>}
+        {pending ? <div className="app-list-loading" role="status">Carregando leads...</div> : error ? <div className="app-inline-error" role="alert">{error} <button type="button" className="app-secondary-button" onClick={() => setReloadKey((value) => value + 1)}>Tentar novamente</button></div> : data && data.items.length > 0 ? (
           <>
             <div className="app-table-wrap"><table className="app-data-table app-leads-table"><thead><tr><th>Recebido</th><th>Lead</th><th>Intenção</th><th>Contexto</th><th>Origem</th><th>Mensagem</th><th>SLA</th><th>Responsável</th><th>Status</th>{canManage && <th>Atribuição</th>}</tr></thead><tbody>{data.items.map((item) => {
               const policy = distributionByIntent.get(item.intent) ?? null;
@@ -277,13 +351,13 @@ export function LeadsPage({ organizationId, canManage }: { organizationId: strin
               const busy = busyLeadId === item.id;
               const contextParts = [item.context.propertyType ? propertyTypeLabels.get(item.context.propertyType) ?? item.context.propertyType : null, [item.context.city, item.context.state].filter(Boolean).join("/") || null].filter(Boolean);
               const routingLabel = matchedRule ? `Regra ${matchedRule.priority} · ${matchedRule.teamName}` : policy?.teamName ?? "Toda a organização";
-              return <tr key={item.id}><td>{formatDateTime(item.receivedAt)}</td><td><strong>{item.name}</strong><small>{item.email || item.phone || "Sem contato informado"}</small></td><td><span className={`app-intent app-intent--${item.intent}`}>{item.intent === "capture" ? "Captação" : "Comprador"}</span></td><td><span className="app-lead-context">{contextParts.length ? contextParts.join(" · ") : "Sem contexto"}</span></td><td>{item.source}</td><td><span className="app-message-preview">{item.message || "—"}</span></td><td><span className={slaClassName(item)}>{slaLabel(item)}</span><small className="app-lead-sla-caption">{slaCaption(item)}</small></td><td><span className="app-lead-responsible">{item.responsible?.displayName ?? "Não atribuído"}</span></td><td><span className={`app-status app-status--${item.status}`}>{statusLabels.get(item.status) ?? item.status}</span></td>{canManage && <td><div className="app-lead-assignment-controls"><select aria-label={`Responsável por ${item.name}`} value={draftMembershipId} disabled={Boolean(busyLeadId)} onChange={(event) => setAssignmentDrafts((current) => ({ ...current, [item.id]: event.target.value }))}><option value="">Sem responsável</option>{eligibleMembers.map((member) => <option key={member.membershipId} value={member.membershipId}>{member.displayName}</option>)}</select><div><button type="button" className="app-secondary-button" disabled={Boolean(busyLeadId) || !assignmentChanged} onClick={() => void saveAssignment(item.id)}>{busy ? "Salvando..." : "Atribuir"}</button>{policy?.mode === "round_robin" && <button type="button" className="app-secondary-button" disabled={Boolean(busyLeadId) || eligibleMembers.length === 0} onClick={() => void applyRoundRobin(item.id)}>{busy ? "Distribuindo..." : "Rodízio"}</button>}{!item.sla.firstResponseAt && (item.status === "new" || item.status === "in_progress") && <button type="button" className="app-secondary-button app-lead-first-response" disabled={Boolean(busyLeadId)} onClick={() => void registerFirstResponse(item.id)}>{busy ? "Registrando..." : "Registrar 1ª resposta"}</button>}</div><small>{item.sla.firstResponseAt ? "SLA de 1ª resposta encerrado e preservado" : policy ? `${policy.mode === "round_robin" ? "Rodízio" : "Manual"} · ${routingLabel}` : "Configuração indisponível"}</small></div></td>}</tr>;
+              return <tr key={item.id}><td>{formatDateTime(item.receivedAt)}</td><td><strong>{item.name}</strong><small>{item.email || item.phone || "Sem contato informado"}</small></td><td><span className={`app-intent app-intent--${item.intent}`}>{item.intent === "capture" ? "Captação" : "Comprador"}</span></td><td><span className="app-lead-context">{contextParts.length ? contextParts.join(" · ") : "Sem contexto"}</span></td><td>{item.source === META_LEAD_SOURCE ? <><strong>Meta Lead Ads</strong><small>{item.metaOrigin ? `Ingestão: ${ingestionLabels[item.metaOrigin.ingestionState] ?? "Indisponível"}` : "Detalhes indisponíveis"}</small></> : item.source}</td><td><span className="app-message-preview">{item.message || "—"}</span></td><td><span className={slaClassName(item)}>{slaLabel(item)}</span><small className="app-lead-sla-caption">{slaCaption(item)}</small></td><td><span className="app-lead-responsible">{item.responsible?.displayName ?? "Não atribuído"}</span></td><td><span className={`app-status app-status--${item.status}`}>{statusLabels.get(item.status) ?? item.status}</span></td>{canManage && <td><div className="app-lead-assignment-controls"><select aria-label={`Responsável por ${item.name}`} value={draftMembershipId} disabled={Boolean(busyLeadId) || !distribution} onChange={(event) => setAssignmentDrafts((current) => ({ ...current, [item.id]: event.target.value }))}><option value="">Sem responsável</option>{eligibleMembers.map((member) => <option key={member.membershipId} value={member.membershipId}>{member.displayName}</option>)}</select><div><button type="button" className="app-secondary-button" disabled={Boolean(busyLeadId) || !distribution || !assignmentChanged} onClick={() => void saveAssignment(item.id)}>{busy ? "Salvando..." : "Atribuir"}</button>{policy?.mode === "round_robin" && <button type="button" className="app-secondary-button" disabled={Boolean(busyLeadId) || eligibleMembers.length === 0} onClick={() => void applyRoundRobin(item.id)}>{busy ? "Distribuindo..." : "Rodízio"}</button>}{!item.sla.firstResponseAt && (item.status === "new" || item.status === "in_progress") && <button type="button" className="app-secondary-button app-lead-first-response" disabled={Boolean(busyLeadId)} onClick={() => void registerFirstResponse(item.id)}>{busy ? "Registrando..." : "Registrar 1ª resposta"}</button>}</div><small>{item.sla.firstResponseAt ? "SLA de 1ª resposta encerrado e preservado" : policy ? `${policy.mode === "round_robin" ? "Rodízio" : "Manual"} · ${routingLabel}` : "Configuração indisponível"}</small></div></td>}</tr>;
             })}</tbody></table></div>
             <div className="app-pagination"><span>{data.totalItems} {data.totalItems === 1 ? "lead" : "leads"}</span><div><button type="button" disabled={data.page <= 1 || loading} onClick={() => setPage((value) => Math.max(1, value - 1))}>Anterior</button><span>{data.page} / {data.totalPages}</span><button type="button" disabled={data.page >= data.totalPages || loading} onClick={() => setPage((value) => value + 1)}>Próxima</button></div></div>
           </>
-        ) : <div className="app-list-empty"><GlobeIcon /><strong>{filtered ? "Nenhum lead encontrado" : "Nenhum lead recebido ainda"}</strong><span>{filtered ? "Ajuste ou limpe os filtros para tentar novamente." : "Os formulários do site alimentarão esta fila preservando intenção, origem e contexto."}</span></div>}
+        ) : <div className="app-list-empty"><GlobeIcon /><strong>{filtered ? "Nenhum lead encontrado" : "Nenhum lead recebido ainda"}</strong><span>{filtered ? "Ajuste ou limpe os filtros para tentar novamente." : "Os formulários do site e da integração Meta alimentarão esta fila preservando intenção, origem e contexto."}</span></div>}
       </section>
-      {editingLead && <LeadEditModal organizationId={organizationId} item={editingLead} onClose={() => setEditingLead(null)} onSaved={() => { setEditingLead(null); setSelectedLeadId(""); setActionMessage({ type: "success", text: "Lead atualizado com sucesso." }); setReloadKey((value) => value + 1); }} />}
+      {editingLeadId && <LeadDetailModal key={editingLeadId} organizationId={organizationId} leadId={editingLeadId} canManage={canManage} onClose={() => setEditingLeadId(null)} onSaved={() => { setEditingLeadId(null); setSelectedLeadId(""); setActionMessage({ type: "success", text: "Lead atualizado com sucesso." }); setReloadKey((value) => value + 1); }} />}
       {creatingLead && <LeadCreateModal organizationId={organizationId} onClose={() => setCreatingLead(false)} onSaved={() => { setCreatingLead(false); setReloadKey((value) => value + 1); }} />}
     </>
   );
