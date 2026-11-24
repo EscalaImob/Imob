@@ -85,6 +85,8 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { PlatformAdminPage } from "./pages/PlatformAdminPage";
 import { GoalsPage } from "./pages/GoalsPage";
 import { LandingPagesPage } from "./pages/LandingPagesPage";
+import { MarketingPage } from "./pages/MarketingPage";
+import { ConversationsPage } from "./pages/ConversationsPage";
 import { NotificationCenter } from "./components/NotificationCenter";
 import {
   readActiveOrganizationId,
@@ -113,6 +115,8 @@ type PageKey =
   | "propertyEditor"
   | "publications"
   | "landingPages"
+  | "marketing"
+  | "conversations"
   | "authorizations"
   | "authorizationEditor"
   | "contracts"
@@ -132,6 +136,7 @@ type NavItem = {
   icon: NavIcon;
   available?: boolean;
   permission?: string;
+  permissionScope?: AccessScope;
   fallbackPermissions?: string[];
   platformPermission?: string;
 };
@@ -179,6 +184,24 @@ const navigation: NavGroup[] = [
         label: "Leads do site",
         path: "/app/leads/",
         icon: GlobeIcon,
+        permission: "crm.leads.read",
+      },
+    ],
+  },
+  {
+    label: "Marketing",
+    items: [
+      {
+        label: "Integração Meta",
+        path: "/app/marketing/",
+        icon: ShareIcon,
+        permission: "organization.read",
+        permissionScope: "organization",
+      },
+      {
+        label: "Conversas",
+        path: "/app/conversas/",
+        icon: UsersIcon,
         permission: "crm.leads.read",
       },
     ],
@@ -300,6 +323,10 @@ function currentPage(): {
   title: string;
 } {
   const path = normalizedPath();
+  if (path === "/app/marketing/")
+    return { key: "marketing", group: "Marketing", label: "Integração Meta", title: "Integração Meta" };
+  if (path === "/app/conversas/")
+    return { key: "conversations", group: "Marketing", label: "Conversas", title: "Conversas" };
   if (path === "/app/admin/")
     return {
       key: "platformAdmin",
@@ -531,7 +558,9 @@ function hasPermissionAtScope(
 function navAvailable(item: NavItem, data: AppBootstrapResult): boolean {
   return (
     item.available === true ||
-    Boolean(item.permission && hasPermission(data, item.permission)) ||
+    Boolean(item.permission && (item.permissionScope
+      ? hasPermissionAtScope(data, item.permission, item.permissionScope)
+      : hasPermission(data, item.permission))) ||
     Boolean(
       item.fallbackPermissions?.some((permission) =>
         hasPermission(data, permission),
@@ -1884,6 +1913,8 @@ export function App() {
   const canReadFinance = hasPermission(bootstrap, "corporate.finance.read");
   const canCreateFinance = hasPermission(bootstrap, "corporate.finance.create");
   const canUpdateFinance = hasPermission(bootstrap, "corporate.finance.update");
+  const canReadMeta = hasPermissionAtScope(bootstrap, "organization.read", "organization");
+  const canManageMeta = hasPermissionAtScope(bootstrap, "organization.update", "organization");
   const canReadSettings = hasPermission(bootstrap, "organization.read");
   const canUpdateSettings = hasPermission(bootstrap, "organization.update");
   const canReadUsers = hasPermission(bootstrap, "users.read");
@@ -2159,6 +2190,24 @@ export function App() {
                 disponível.
               </p>
             </section>
+          ) : page.key === "marketing" || page.key === "conversations" ? (
+            switchingOrganization ? (
+              <p role="status">Carregando organização…</p>
+            ) : page.key === "marketing" ? (
+              canReadMeta ? (
+                <MarketingPage
+                  key={`${activeOrganization.id}:${activeOrganization.membershipId}:${canManageMeta}`}
+                  organizationId={activeOrganization.id}
+                  canManage={canManageMeta}
+                />
+              ) : (
+                <ModuleAccessDenied title="Integração Meta" />
+              )
+            ) : hasPermission(bootstrap, "crm.leads.read") ? (
+              <ConversationsPage key={`${activeOrganization.id}:${activeOrganization.membershipId}`} />
+            ) : (
+              <ModuleAccessDenied title="Conversas" />
+            )
           ) : page.key === "goals" ? (
             canReadGoals ? (
               <GoalsPage
