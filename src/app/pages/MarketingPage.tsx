@@ -6,6 +6,7 @@ import {
 } from "../../services/metaApi";
 import "./meta.css";
 import { MetaAutomationSection } from "./MetaAutomationSection";
+import { MetaCampaignSection } from "./MetaCampaignSection";
 import { MetaInsightsSection } from "./MetaInsightsSection";
 import type { ActionGrants } from "../../services/automationApi";
 
@@ -61,7 +62,7 @@ function authorizationDestination(raw: string, expiresAt: string): URL {
 }
 
 type Action = "connect" | "test" | "revoke" | "assets";
-export function MarketingPage({ organizationId, canManage, canReadAutomation, automationGrants, canReadInsights }: { organizationId: string; canManage: boolean; canReadAutomation: boolean; automationGrants: ActionGrants; canReadInsights: boolean }) {
+export function MarketingPage({ organizationId, canManage, canReadAutomation, automationGrants, canReadInsights, canReadCampaigns, canWriteCampaigns }: { organizationId: string; canManage: boolean; canReadAutomation: boolean; automationGrants: ActionGrants; canReadInsights: boolean; canReadCampaigns: boolean; canWriteCampaigns: boolean }) {
   const [status, setStatus] = useState<MetaStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(0);
@@ -192,6 +193,7 @@ export function MarketingPage({ organizationId, canManage, canReadAutomation, au
       </>}
       {canReadAutomation && <MetaAutomationSection org={organizationId} grants={automationGrants} />}
       {canReadInsights && <MetaInsightsSection key={`${refresh}:${loading}:${connection?.state ?? "unknown"}:${connection?.assets.filter(a => a.selected && a.type === "ad_account").map(a => a.id).join(",") ?? ""}`} org={organizationId} assets={connection?.state === "connected" ? connection.assets : []} />}
+      {canReadCampaigns && <MetaCampaignSection org={organizationId} status={status} statusLoading={loading} statusBusy={!!busy} canWrite={canWriteCampaigns} />}
     </section>
   );
 }

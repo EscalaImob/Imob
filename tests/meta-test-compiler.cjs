@@ -14,6 +14,6 @@ function compatible() {
       if (typeof compiler.transpileModule === 'function') return compiler;
     } catch { /* another PATH entry may contain the pinned compiler */ }
   }
-  throw new Error('Use npm exec --yes --package=typescript@5.8.3 -- node --test tests/d2-leads.test.cjs tests/d3-conversations.test.cjs tests/d4-meta.test.cjs');
+  throw new Error('Use npm exec --yes --package=typescript@5.8.3 -- node --test tests/d2-leads.test.cjs tests/d3-conversations.test.cjs tests/d4-meta.test.cjs tests/d5-campaigns.test.cjs');
 }
 module.exports = compatible();
