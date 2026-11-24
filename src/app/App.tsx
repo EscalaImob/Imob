@@ -1920,6 +1920,8 @@ export function App() {
   const canAutomationTask = canManageAutomation && hasPermissionAtScope(bootstrap, "productivity.tasks.create", "organization");
   const canAutomationStage = canManageAutomation && hasPermissionAtScope(bootstrap, "crm.opportunities.update", "organization");
   const canReadInsights = canReadAutomation && hasPermissionAtScope(bootstrap, "corporate.reports.read", "organization");
+  const canReadCampaigns = canReadMeta && hasPermissionAtScope(bootstrap, "portfolio.properties.read", "organization") && hasPermissionAtScope(bootstrap, "portfolio.publications.read", "organization") && hasPermissionAtScope(bootstrap, "portfolio.landing_pages.read", "organization");
+  const canWriteCampaigns = canReadCampaigns && canManageMeta && hasPermissionAtScope(bootstrap, "portfolio.publications.update", "organization");
   const canReadSettings = hasPermission(bootstrap, "organization.read");
   const canUpdateSettings = hasPermission(bootstrap, "organization.update");
   const canReadUsers = hasPermission(bootstrap, "users.read");
@@ -2201,12 +2203,14 @@ export function App() {
             ) : page.key === "marketing" ? (
               canReadMeta ? (
                 <MarketingPage
-                  key={`${activeOrganization.id}:${activeOrganization.membershipId}:${canManageMeta}:${canReadAutomation}:${canManageAutomation}:${canAutomationTask}:${canAutomationStage}:${canReadInsights}`}
+                  key={`${activeOrganization.id}:${activeOrganization.membershipId}:${canManageMeta}:${canReadAutomation}:${canManageAutomation}:${canAutomationTask}:${canAutomationStage}:${canReadInsights}:${canReadCampaigns}:${canWriteCampaigns}`}
                   organizationId={activeOrganization.id}
                   canManage={canManageMeta}
                   canReadAutomation={canReadAutomation}
                   automationGrants={{manage: canManageAutomation, task: canAutomationTask, stage: canAutomationStage}}
                   canReadInsights={canReadInsights}
+                  canReadCampaigns={canReadCampaigns}
+                  canWriteCampaigns={canWriteCampaigns}
                 />
               ) : (
                 <ModuleAccessDenied title="Integração Meta" />

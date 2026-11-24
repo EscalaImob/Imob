@@ -65,3 +65,16 @@
 .meta-module .meta-d4-list button { text-align: left; white-space: normal; overflow-wrap: anywhere; }
 .meta-module .meta-d4-list button[aria-pressed="true"] { outline: 1px solid currentColor; }
 .meta-module .meta-d4 button:disabled { opacity: .55; cursor: not-allowed; }
+
+/* D5 — Campanhas, scoped to the existing Marketing theme. */
+.meta-module .meta-d5, .meta-module .meta-d5-list { display: grid; gap: 12px; }
+.meta-module .meta-d5 h3 { margin-top: 0; }
+.meta-module .meta-d5-form, .meta-module .meta-d5-review { display: grid; gap: 10px; min-width: 0; border: 1px solid var(--app-border); border-radius: 8px; padding: 12px; }
+.meta-module .meta-d5 fieldset { display: grid; gap: 8px; border: 1px solid var(--app-border); border-radius: 8px; padding: 10px; margin: 0; min-width: 0; }
+.meta-module .meta-d5 legend { font-weight: 700; padding: 0 4px; }
+.meta-module .meta-d5 label { display: grid; gap: 4px; min-width: 0; font-weight: 600; }
+.meta-module .meta-d5 select, .meta-module .meta-d5 input:not([type="checkbox"]) { min-width: 0; width: 100%; padding: 8px; border: 1px solid var(--app-border); border-radius: 7px; background: var(--app-surface-soft, #f7f7f8); color: inherit; font: inherit; }
+.meta-module .meta-d5-line { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); }
+.meta-module .meta-d5 .meta-d5-consent { display: flex; align-items: flex-start; gap: 8px; }
+.meta-module .meta-d5 button { justify-self: start; white-space: normal; }
+.meta-module .meta-d5 button:disabled { opacity: .55; cursor: not-allowed; }
