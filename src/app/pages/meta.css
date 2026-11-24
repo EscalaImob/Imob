@@ -49,3 +49,19 @@
 .meta-chat-module .meta-chat-link { border-bottom: 1px solid var(--app-border, #d6d9df); padding-bottom: 6px; }
 @media (min-width: 1051px) { .meta-chat-module .meta-conversations { grid-template-columns: minmax(200px, 1fr) minmax(260px, 1.8fr) minmax(180px, .95fr); } }
 @media (max-width: 1050px) { .meta-chat-module .meta-chat-column { min-height: 360px; } .meta-chat-module .meta-thread-list { max-height: 280px; } }
+
+/* D4 — scoped to the existing Marketing panel and theme. */
+.meta-module .meta-d4 { display: grid; gap: 12px; }
+.meta-module .meta-d4 h3 { margin-top: 0; }
+.meta-module .meta-d4-form { display: grid; gap: 10px; border: 1px solid var(--app-border); border-radius: 8px; padding: 12px; min-width: 0; }
+.meta-module .meta-d4-form fieldset { display: grid; gap: 10px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.meta-module .meta-d4-form label { display: grid; gap: 4px; font-weight: 600; min-width: 0; }
+.meta-module .meta-d4-form input, .meta-module .meta-d4-form select { min-width: 0; width: 100%; padding: 8px; border: 1px solid var(--app-border); border-radius: 7px; background: var(--app-surface-soft, #f7f7f8); color: inherit; font: inherit; }
+.meta-module .meta-d4-form button { justify-self: start; }
+.meta-module .meta-d4-line { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+.meta-module .meta-d4-line label { flex: 1 1 150px; }
+.meta-module .meta-d4-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; }
+.meta-module .meta-d4-list { display: grid; gap: 6px; margin-top: 8px; }
+.meta-module .meta-d4-list button { text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.meta-module .meta-d4-list button[aria-pressed="true"] { outline: 1px solid currentColor; }
+.meta-module .meta-d4 button:disabled { opacity: .55; cursor: not-allowed; }

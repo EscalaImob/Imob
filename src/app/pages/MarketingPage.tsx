@@ -5,6 +5,9 @@ import {
   type AssetType, type Availability, type Capability, type CapabilityKey, type ConnectionState, type MetaStatus,
 } from "../../services/metaApi";
 import "./meta.css";
+import { MetaAutomationSection } from "./MetaAutomationSection";
+import { MetaInsightsSection } from "./MetaInsightsSection";
+import type { ActionGrants } from "../../services/automationApi";
 
 const stateLabels: Record<ConnectionState, string> = {
   disconnected: "Desconectada", pending: "Pendente", connected: "Conectada",
@@ -58,7 +61,7 @@ function authorizationDestination(raw: string, expiresAt: string): URL {
 }
 
 type Action = "connect" | "test" | "revoke" | "assets";
-export function MarketingPage({ organizationId, canManage }: { organizationId: string; canManage: boolean }) {
+export function MarketingPage({ organizationId, canManage, canReadAutomation, automationGrants, canReadInsights }: { organizationId: string; canManage: boolean; canReadAutomation: boolean; automationGrants: ActionGrants; canReadInsights: boolean }) {
   const [status, setStatus] = useState<MetaStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(0);
@@ -174,7 +177,7 @@ export function MarketingPage({ organizationId, canManage }: { organizationId: s
         </section>
         <section className="meta-panel"><h2>Capacidades da integração</h2><CapabilityList capabilities={status.capabilities} />
           {connection && <><h3>Capacidades da conexão</h3><CapabilityList capabilities={connection.capabilities} /></>}
-          <p className="meta-muted">A disponibilidade é definida pelo servidor. Não habilita envio, automação ou gestão de anúncios neste lote.</p>
+          <p className="meta-muted">A disponibilidade é definida pelo servidor. Não concede autorização para envio, automação ou gestão de anúncios por si só.</p>
         </section>
         <section className="meta-panel"><h2>Ativos descobertos</h2>
           {!connection?.assets.length ? <p className="meta-muted">Nenhum ativo disponível nesta conexão.</p> : <>
@@ -187,6 +190,8 @@ export function MarketingPage({ organizationId, canManage }: { organizationId: s
           </>}
         </section>
       </>}
+      {canReadAutomation && <MetaAutomationSection org={organizationId} grants={automationGrants} />}
+      {canReadInsights && <MetaInsightsSection key={`${refresh}:${loading}:${connection?.state ?? "unknown"}:${connection?.assets.filter(a => a.selected && a.type === "ad_account").map(a => a.id).join(",") ?? ""}`} org={organizationId} assets={connection?.state === "connected" ? connection.assets : []} />}
     </section>
   );
 }
