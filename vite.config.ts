@@ -19,6 +19,8 @@ export default defineConfig(({ mode }) => ({
         appGoals: "app/metas/index.html",
         appClients: "app/clientes/index.html",
         appLeads: "app/leads/index.html",
+        appMarketing: "app/marketing/index.html",
+        appConversations: "app/conversas/index.html",
         appBuyersFunnel: "app/funis/compradores/index.html",
         appCaptureFunnel: "app/funis/captacao/index.html",
         appOpportunity: "app/oportunidade/index.html",
