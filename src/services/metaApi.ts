@@ -68,7 +68,7 @@ export interface LeadOrigin {
 }
 
 // Same authenticated tenant transport as crmApi; no automatic retries or fallback.
-export async function requestMeta<T>(organizationId: string, path: string, signal?: AbortSignal, input?: object): Promise<T> {
+export async function requestMeta<T>(organizationId: string, path: string, signal?: AbortSignal, input?: object, options?: { method?: "PATCH" | "PUT"; allowNull?: boolean }): Promise<T> {
   const controller = new AbortController();
   const abort = () => controller.abort();
   if (signal?.aborted) abort();
@@ -82,7 +82,7 @@ export async function requestMeta<T>(organizationId: string, path: string, signa
     if (!session) throw new AppApiError("Sua sessão expirou. Entre novamente.", "UNAUTHORIZED", 401);
     if (controller.signal.aborted) throw new AppApiError("Solicitação cancelada ou expirada.", "REQUEST_TIMEOUT");
     const response = await fetch(`${base.replace(/\/+$/u, "")}${path}`, {
-      method: input === undefined ? "GET" : "POST",
+      method: options?.method ?? (input === undefined ? "GET" : "POST"),
       headers: {
         authorization: `Bearer ${session.accessToken}`,
         "x-organization-id": organizationId,
@@ -96,7 +96,7 @@ export async function requestMeta<T>(organizationId: string, path: string, signa
     if (!response.ok || body?.success === false) {
       throw new MetaError(body?.error?.message || "Não foi possível concluir a operação Meta.", body?.error?.code || "API_ERROR", response.status);
     }
-    if (body?.success !== true || body.data == null) {
+    if (body?.success !== true || (body.data === undefined || (body.data === null && !options?.allowNull))) {
       throw new AppApiError("Recebemos uma resposta inesperada da plataforma.", "INVALID_API_RESPONSE", response.status);
     }
     return body.data;

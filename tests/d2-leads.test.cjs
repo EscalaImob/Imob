@@ -5,11 +5,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
-let ts;
-try { ts = require('typescript'); } catch { /* fall back to installed global compiler */ }
-if (!ts?.transpileModule) ts = require(path.join(execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim(), 'typescript'));
+const ts = require('./meta-test-compiler.cjs');
 function load(file, mocks, globals = {}) {
   const source = fs.readFileSync(path.join(root, file), 'utf8');
   const result = ts.transpileModule(source.replaceAll('import.meta.env.VITE_API_URL', '"https://fixture.invalid"'), {

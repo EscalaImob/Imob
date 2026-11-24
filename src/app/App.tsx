@@ -1915,6 +1915,11 @@ export function App() {
   const canUpdateFinance = hasPermission(bootstrap, "corporate.finance.update");
   const canReadMeta = hasPermissionAtScope(bootstrap, "organization.read", "organization");
   const canManageMeta = hasPermissionAtScope(bootstrap, "organization.update", "organization");
+  const canReadAutomation = canReadMeta && hasPermissionAtScope(bootstrap, "crm.leads.read", "organization");
+  const canManageAutomation = canReadAutomation && canManageMeta && hasPermissionAtScope(bootstrap, "crm.leads.manage", "organization");
+  const canAutomationTask = canManageAutomation && hasPermissionAtScope(bootstrap, "productivity.tasks.create", "organization");
+  const canAutomationStage = canManageAutomation && hasPermissionAtScope(bootstrap, "crm.opportunities.update", "organization");
+  const canReadInsights = canReadAutomation && hasPermissionAtScope(bootstrap, "corporate.reports.read", "organization");
   const canReadSettings = hasPermission(bootstrap, "organization.read");
   const canUpdateSettings = hasPermission(bootstrap, "organization.update");
   const canReadUsers = hasPermission(bootstrap, "users.read");
@@ -2196,9 +2201,12 @@ export function App() {
             ) : page.key === "marketing" ? (
               canReadMeta ? (
                 <MarketingPage
-                  key={`${activeOrganization.id}:${activeOrganization.membershipId}:${canManageMeta}`}
+                  key={`${activeOrganization.id}:${activeOrganization.membershipId}:${canManageMeta}:${canReadAutomation}:${canManageAutomation}:${canAutomationTask}:${canAutomationStage}:${canReadInsights}`}
                   organizationId={activeOrganization.id}
                   canManage={canManageMeta}
+                  canReadAutomation={canReadAutomation}
+                  automationGrants={{manage: canManageAutomation, task: canAutomationTask, stage: canAutomationStage}}
+                  canReadInsights={canReadInsights}
                 />
               ) : (
                 <ModuleAccessDenied title="Integração Meta" />
