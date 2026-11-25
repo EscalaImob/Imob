@@ -51,24 +51,37 @@ function errorDetails(error: unknown) {
 }
 // A response in test mode must never lead to a provider redirect. In live mode the
 // server alone checks OAuth configuration, flags and authorization before issuing the URL.
-function authorizationDestination(raw: string, expiresAt: string): URL {
+type OAuthChannel = null | "instagram";
+function authorizationDestination(raw: string, expiresAt: string, channel: OAuthChannel): URL {
   const expiration = Date.parse(expiresAt);
   let url: URL;
   try { url = new URL(raw); } catch { throw new AppApiError("URL de autorização inválida.", "INVALID_API_RESPONSE"); }
   if (url.protocol !== "https:" || url.username || url.password || !Number.isFinite(expiration) || expiration <= Date.now()) {
     throw new AppApiError("Autorização inválida ou expirada. Atualize o estado e tente novamente.", "INVALID_API_RESPONSE");
   }
+  // Never follow a Facebook/other-provider URL in the Instagram Login flow.
+  // Server remains responsible for the actual authorization endpoint and state.
+  if (channel === "instagram" && !["https://www.instagram.com", "https://instagram.com"].includes(url.origin)) {
+    throw new AppApiError("O servidor não retornou uma autorização Instagram válida.", "INVALID_API_RESPONSE");
+  }
   return url;
 }
 
 type Action = "connect" | "test" | "revoke" | "assets";
-export function MarketingPage({ organizationId, canManage, canReadAutomation, automationGrants, canReadInsights, canReadCampaigns, canWriteCampaigns }: { organizationId: string; canManage: boolean; canReadAutomation: boolean; automationGrants: ActionGrants; canReadInsights: boolean; canReadCampaigns: boolean; canWriteCampaigns: boolean }) {
+type MarketingPageProps = { organizationId: string; canManage: boolean; canReadAutomation: boolean; automationGrants: ActionGrants; canReadInsights: boolean; canReadCampaigns: boolean; canWriteCampaigns: boolean };
+export function MarketingPage(props: MarketingPageProps) {
+  // The app also keys this page by membership/grants. Ensure local state cannot
+  // survive a tenant or write-permission change even if reused independently.
+  return <MarketingTenantPage key={`${props.organizationId}:${props.canManage}`} {...props} />;
+}
+function MarketingTenantPage({ organizationId, canManage, canReadAutomation, automationGrants, canReadInsights, canReadCampaigns, canWriteCampaigns }: MarketingPageProps) {
   const [status, setStatus] = useState<MetaStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(0);
   const [error, setError] = useState<ReturnType<typeof errorDetails> | null>(null);
   const [actionError, setActionError] = useState<ReturnType<typeof errorDetails> | null>(null);
   const [busy, setBusy] = useState<Action | null>(null);
+  const [oauthChannel, setOAuthChannel] = useState<OAuthChannel>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const actionController = useRef<AbortController | null>(null);
@@ -120,9 +133,9 @@ export function MarketingPage({ organizationId, canManage, canReadAutomation, au
     setNotice(null);
     try {
       if (action === "connect") {
-        const result = await startMetaOAuth(organizationId, null, controller.signal);
+        const result = await startMetaOAuth(organizationId, oauthChannel, controller.signal);
         if (controller.signal.aborted) return;
-        const destination = authorizationDestination(result.authorizationUrl, result.expiresAt);
+        const destination = authorizationDestination(result.authorizationUrl, result.expiresAt, oauthChannel);
         if (globalThis.location.pathname.replace(/\/+$/u, "") === "/app/marketing") globalThis.location.assign(destination.href);
         return;
       }
@@ -153,8 +166,8 @@ export function MarketingPage({ organizationId, canManage, canReadAutomation, au
         <button className="app-secondary-button" type="button" onClick={reload} disabled={loading || !!busy}>Atualizar estado</button>
       </header>
       {loading && <div className="meta-panel" role="status">Carregando estado da integração…</div>}
-      {error && <div className="meta-panel" role="alert"><strong>{error.status === 403 ? "Acesso não autorizado" : "Não foi possível carregar a integração"}</strong><p>{error.message}</p><button type="button" className="app-secondary-button" onClick={reload}>Tentar novamente</button></div>}
-      {actionError && <div className="meta-panel" role="alert"><strong>Operação não concluída</strong><p>{actionError.message}</p>{blocked && <p>Atualize o estado antes de tentar outra operação.</p>}</div>}
+      {error && <div className="meta-panel" role="alert"><strong>{error.status === 403 ? "Acesso não autorizado" : error.status === 503 ? "Integração indisponível" : "Não foi possível carregar a integração"}</strong><p>{error.message}</p><button type="button" className="app-secondary-button" onClick={reload}>Tentar novamente</button></div>}
+      {actionError && <div className="meta-panel" role="alert"><strong>{actionError.status === 403 ? "Acesso não autorizado" : actionError.status === 503 ? "Integração indisponível" : "Operação não concluída"}</strong><p>{actionError.message}</p>{blocked && <p>Atualize o estado antes de tentar outra operação.</p>}</div>}
       {notice && <p role="status">{notice}</p>}
       {status && !loading && <>
         <section className="meta-panel">
@@ -170,8 +183,14 @@ export function MarketingPage({ organizationId, canManage, canReadAutomation, au
           </dl>}
           {!canManage && <p className="meta-muted">Acesso somente para leitura. Alterações exigem a permissão de atualização da organização.</p>}
           {canManage && status.mode !== "live" && <p className="meta-muted">Conexão real indisponível enquanto o servidor estiver em modo de teste.</p>}
+          <fieldset disabled={!canConnect} aria-describedby="meta-oauth-help">
+            <legend>Tipo de conexão</legend>
+            <label className="meta-select"><input type="radio" name="meta-oauth-channel" checked={oauthChannel === null} onChange={() => setOAuthChannel(null)} /> Facebook (fluxo existente)</label>
+            <label className="meta-select"><input type="radio" name="meta-oauth-channel" checked={oauthChannel === "instagram"} onChange={() => setOAuthChannel("instagram")} /> Instagram Login (conta profissional)</label>
+          </fieldset>
+          <p className="meta-muted" id="meta-oauth-help">Instagram Login depende de configuração e autorização do servidor. A seleção não conecta uma conta nem habilita mensagens, WhatsApp ou anúncios.</p>
           <div className="meta-actions">
-            <button type="button" className="app-primary-button" disabled={!canConnect} onClick={() => void run("connect")}>{busy === "connect" ? "Iniciando…" : "Conectar Meta"}</button>
+            <button type="button" className="app-primary-button" disabled={!canConnect} onClick={() => void run("connect")}>{busy === "connect" ? "Iniciando…" : oauthChannel === "instagram" ? "Conectar Instagram" : "Conectar Meta"}</button>
             <button type="button" className="app-secondary-button" disabled={!canTest} onClick={() => void run("test")}>{busy === "test" ? "Verificando…" : "Testar conexão"}</button>
             <button type="button" className="app-secondary-button" disabled={!canRevoke} onClick={() => void run("revoke")}>{busy === "revoke" ? "Revogando…" : "Revogar conexão"}</button>
           </div>
