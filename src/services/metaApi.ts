@@ -144,3 +144,81 @@ export const startMetaOAuth = (organizationId: string, channel: Channel | null, 
 export const selectMetaAssets = (organizationId: string, id: string, assetIds: string[], signal?: AbortSignal) => requestMeta<MetaConnection>(organizationId, `${connectionPath(id)}/assets`, signal, { assetIds });
 export const testMetaConnection = (organizationId: string, id: string, signal?: AbortSignal) => requestMeta<MetaConnection>(organizationId, `${connectionPath(id)}/test`, signal, {});
 export const revokeMetaConnection = (organizationId: string, id: string, signal?: AbortSignal) => requestMeta<MetaConnection>(organizationId, `${connectionPath(id)}/revoke`, signal, {});
+
+// ORQ061: opt-in DTOs. V1 functions above keep their paths, envelopes and behavior.
+export type OAuthProduct = "instagram_login_v1" | "facebook_login_manual" | null;
+export type CredentialState = "usable" | "expired" | "revoked" | "unverified";
+export interface MetaAssetV2 extends MetaAsset { connectionId: string }
+export interface MetaConnectionV2 extends MetaConnection {
+  oauthProduct: OAuthProduct;
+  credentialState: CredentialState;
+  assets: MetaAssetV2[];
+}
+export interface MetaStatusV2 {
+  contractVersion: 2;
+  connections: MetaConnectionV2[];
+  mode: Mode;
+  capabilities: Capability[];
+}
+export type MetaConnectionRead = { version: 2; status: MetaStatusV2 } | { version: 1; status: MetaStatus };
+const v2Path = (path: string) => `${path}?contractVersion=2`;
+const uuidV2 = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(value);
+const uniqueV2 = (ids: string[]) => new Set(ids.map(id => id.toLowerCase())).size === ids.length;
+const isAssetV2 = (value: unknown): value is MetaAssetV2 => isAsset(value) && uuidV2(value.id)
+  && isRecord(value) && uuidV2(value.connectionId);
+function isConnectionV2(value: unknown): value is MetaConnectionV2 {
+  if (!isConnection(value) || !isRecord(value) || !uuidV2(value.id)) return false;
+  const assets = value.assets;
+  return (value.oauthProduct === null || value.oauthProduct === "instagram_login_v1" || value.oauthProduct === "facebook_login_manual")
+    && ["usable", "expired", "revoked", "unverified"].some(state => state === value.credentialState)
+    && assets.every(asset => isAssetV2(asset) && asset.connectionId === value.id && (!asset.selected || value.state === "connected"))
+    && uniqueV2(assets.map(asset => asset.id))
+    && (value.oauthProduct !== "instagram_login_v1" || assets.filter(asset => asset.type === "instagram_account").length <= 1)
+    && ((value.state === "revoked") === (value.credentialState === "revoked"));
+}
+function isConnectionsV2(value: unknown): value is MetaConnectionV2[] {
+  return Array.isArray(value) && value.every(isConnectionV2)
+    && uniqueV2(value.map(c => c.id)) && uniqueV2(value.flatMap(c => c.assets.map(a => a.id)));
+}
+function isStatusV2(value: unknown): value is MetaStatusV2 {
+  return isRecord(value) && value.contractVersion === 2 && isConnectionsV2(value.connections)
+    && value.mode === (value.connections.some(c => c.mode === "live") ? "live" : "test") && isCapabilityList(value.capabilities);
+}
+function invalidV2(): never { throw new AppApiError("Resposta Meta V2 inválida ou incompatível.", "INVALID_API_RESPONSE"); }
+function assertIdV2(id: string) {
+  if (!uuidV2(id)) throw new AppApiError("Identificador interno inválido.", "VALIDATION_ERROR", 422);
+}
+// Only an unversioned, valid V1 status positively identifies a server that ignored
+// the opt-in. Never downgrade on 401/403/404/422/503, timeout or malformed V2.
+export async function readMetaConnectionsV2(org: string, signal?: AbortSignal): Promise<MetaConnectionRead> {
+  const data = await requestMeta<unknown>(org, v2Path("/meta/status"), signal);
+  if (isStatusV2(data)) return { version: 2, status: data };
+  if (isRecord(data) && !("contractVersion" in data) && !("connections" in data) && isStatus(data)) return { version: 1, status: data };
+  return invalidV2();
+}
+export async function listMetaConnectionsV2(org: string, signal?: AbortSignal): Promise<{ contractVersion: 2; items: MetaConnectionV2[] }> {
+  const data = await requestMeta<unknown>(org, v2Path("/meta/connections"), signal);
+  if (!isRecord(data) || data.contractVersion !== 2 || !isConnectionsV2(data.items)) return invalidV2();
+  return { contractVersion: 2, items: data.items };
+}
+export async function listMetaAssetsV2(org: string, id: string, signal?: AbortSignal): Promise<{ contractVersion: 2; items: MetaAssetV2[] }> {
+  assertIdV2(id);
+  const data = await requestMeta<unknown>(org, v2Path(`${connectionPath(id)}/assets`), signal);
+  if (!isRecord(data) || data.contractVersion !== 2 || !Array.isArray(data.items)
+    || !data.items.every(a => isAssetV2(a) && a.connectionId === id) || !uniqueV2(data.items.map(a => a.id))) return invalidV2();
+  return { contractVersion: 2, items: data.items };
+}
+async function mutateMetaConnectionV2(org: string, id: string, operation: "assets" | "test" | "revoke", body: object, signal?: AbortSignal): Promise<MetaConnectionV2> {
+  assertIdV2(id);
+  const data = await requestMeta<unknown>(org, v2Path(`${connectionPath(id)}/${operation}`), signal, body);
+  if (!isConnectionV2(data) || data.id !== id) return invalidV2();
+  return data;
+}
+export async function selectMetaAssetsV2(org: string, id: string, assetIds: string[], signal?: AbortSignal): Promise<MetaConnectionV2> {
+  if (!Array.isArray(assetIds) || assetIds.length > 500 || !assetIds.every(uuidV2) || !uniqueV2(assetIds)) {
+    throw new AppApiError("Seleção de ativos inválida.", "VALIDATION_ERROR", 422);
+  }
+  return mutateMetaConnectionV2(org, id, "assets", { assetIds }, signal);
+}
+export const testMetaConnectionV2 = (org: string, id: string, signal?: AbortSignal) => mutateMetaConnectionV2(org, id, "test", {}, signal);
+export const revokeMetaConnectionV2 = (org: string, id: string, signal?: AbortSignal) => mutateMetaConnectionV2(org, id, "revoke", {}, signal);
