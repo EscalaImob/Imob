@@ -8,6 +8,9 @@ export default defineConfig(({ mode }) => ({
     rollupOptions: {
       input: {
         main: "index.html",
+        privacyPolicy: "politica-de-privacidade/index.html",
+        termsOfUse: "termos-de-uso/index.html",
+        dataDeletion: "exclusao-de-dados/index.html",
         capture: "captura/index.html",
         registration: "registro/index.html",
         login: "login/index.html",
